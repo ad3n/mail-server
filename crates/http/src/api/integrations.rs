@@ -386,6 +386,25 @@ mod tests {
             }),
             core,
         };
+        let mut untracked = server.new_message("from@example.com", MessageSource::Authenticated, 0);
+        let untracked_id = untracked.queue_id;
+        untracked.message.recipients = vec![Recipient::new("recipient@example.com")];
+        assert!(untracked.save_changes(&server, None, None).await);
+        let untracked = server
+            .read_message(untracked_id, Default::default())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(untracked.message.tracking().is_none());
+        assert!(untracked.previous_status.is_empty());
+        assert!(untracked.remove(&server, None).await);
+        assert!(
+            delivery_range::<serde_json::Value>(server.store(), "delivery/", "delivery/~", 1)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
         let admin = || AccessToken::from_permissions(1, [Permission::SysSystemSettingsUpdate]);
         let other = || AccessToken::from_permissions(3, []);
         let app = br#"{"name":"Billing","webhookUrl":"https://billing.example.com/callback"}"#;

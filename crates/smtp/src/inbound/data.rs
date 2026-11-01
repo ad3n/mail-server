@@ -83,6 +83,13 @@ async fn extract_tracking(
     let Some(message) = MessageParser::new().parse_headers(&raw) else {
         return Ok((raw, None));
     };
+    if !message.headers().iter().any(|header| {
+        let header_name = header.name();
+        let name = header_name.as_str();
+        name.eq_ignore_ascii_case("App-Key") || name.eq_ignore_ascii_case("App-Token")
+    }) {
+        return Ok((raw, None));
+    }
     let mut app_key = None;
     let mut app_token = None;
     let mut external_range = None;
@@ -98,12 +105,12 @@ async fn extract_tracking(
             &mut app_token
         } else if name.as_str().eq_ignore_ascii_case("External-ID") {
             duplicate_external |= external_range.replace(value_range).is_some();
-            ranges.push(h.offset_field() as usize..h.offset_end() as usize);
+            ranges.push((h.offset_field() as usize..h.offset_end() as usize, true));
             continue;
         } else {
             continue;
         };
-        ranges.push(h.offset_field() as usize..h.offset_end() as usize);
+        ranges.push((h.offset_field() as usize..h.offset_end() as usize, false));
         let value = raw
             .get(value_range)
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
@@ -145,9 +152,10 @@ async fn extract_tracking(
         None
     };
 
+    ranges.retain(|(_, external)| !external || tracking.is_some());
     // Validate every offset before modifying the message, then compact it in one pass.
     let mut end = 0;
-    for range in &ranges {
+    for (range, _) in &ranges {
         if range.start < end || range.start > range.end || range.end > raw.len() {
             return Err(b"550 5.6.0 Invalid tracking header offsets.\r\n");
         }
@@ -155,7 +163,7 @@ async fn extract_tracking(
     }
     let mut read = 0;
     let mut write = 0;
-    for range in ranges {
+    for (range, _) in ranges {
         raw.copy_within(read..range.start, write);
         write += range.start - read;
         read = range.end;
@@ -1382,6 +1390,22 @@ mod tracking_tests {
     }
 
     #[tokio::test]
+    async fn mail_without_integration_headers_is_byte_identical() {
+        let store = registered_store().await;
+        for raw in [
+            &b"Subject: Normal\r\nMessage-ID: <id@example.com>\r\n\r\nbody"[..],
+            &b"DKIM-Signature: original\r\nExternal-ID: ../business-id\r\nExternal-ID: duplicate\r\n\r\nbody"[..],
+            &b"Api-Key: unrelated\nApi-Token: unrelated\nExternal-ID: untracked\n\nApp-Key: body"[..],
+        ] {
+            for authenticated in [true, false] {
+                let (cleaned, tracking) = extract_tracking(&store, authenticated, raw.to_vec()).await.unwrap();
+                assert_eq!(cleaned, raw);
+                assert!(tracking.is_none());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn invalid_or_missing_credentials_skip_external_id_validation() {
         let store = registered_store().await;
         for credentials in [
@@ -1396,7 +1420,10 @@ mod tracking_tests {
             let raw = format!("Subject: Hi\r\n{credentials}External-ID: ../invalid\r\nExternal-ID: duplicate\r\n\r\nbody").into_bytes();
             let (cleaned, tracking) = extract_tracking(&store, true, raw).await.unwrap();
             assert!(tracking.is_none());
-            assert_eq!(cleaned, b"Subject: Hi\r\n\r\nbody");
+            assert_eq!(
+                cleaned,
+                b"Subject: Hi\r\nExternal-ID: ../invalid\r\nExternal-ID: duplicate\r\n\r\nbody"
+            );
         }
         let raw =
             b"App-Key: key\r\nApp-Token: token\r\nExternal-ID: ../invalid\r\n\r\nbody".to_vec();

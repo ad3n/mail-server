@@ -116,3 +116,49 @@ impl MessageWrapper {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[derive(rkyv::Serialize, rkyv::Archive)]
+    enum LegacyMetadata {
+        QueueSize { key: u128, id: u64 },
+        QueueCount { key: u128, id: u64 },
+        Headers { value: Box<[u8]>, id: u64 },
+        Submission { account_id: u32 },
+    }
+
+    #[test]
+    fn reads_metadata_archived_before_tracking_was_added() {
+        let old = vec![
+            LegacyMetadata::QueueSize {
+                key: u128::MAX,
+                id: 5,
+            },
+            LegacyMetadata::QueueCount { key: 20, id: 6 },
+            LegacyMetadata::Headers {
+                value: b"Subject: Legacy\r\n".to_vec().into_boxed_slice(),
+                id: 7,
+            },
+            LegacyMetadata::Submission { account_id: 42 },
+        ];
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&old).unwrap();
+        let restored = rkyv::from_bytes::<Vec<Metadata>, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(
+            restored,
+            vec![
+                Metadata::QueueSize {
+                    key: u128::MAX,
+                    id: 5
+                },
+                Metadata::QueueCount { key: 20, id: 6 },
+                Metadata::Headers {
+                    value: b"Subject: Legacy\r\n".to_vec().into_boxed_slice(),
+                    id: 7
+                },
+                Metadata::Submission { account_id: 42 },
+            ]
+        );
+    }
+}

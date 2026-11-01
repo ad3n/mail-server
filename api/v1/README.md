@@ -32,7 +32,7 @@ Pembuatan sukses menghasilkan HTTP 201. Body berisi `appId`. Header respons memu
 
 ## Pengiriman dan lookup
 
-Saat submission SMTP terautentikasi, tambahkan header pesan `External-ID`, `App-Key`, dan `App-Token`. Stalwart memverifikasi kredensial aplikasi sebelum mengambil nilai External-ID. Jika kredensial tidak lengkap, tidak valid, atau tidak ditemukan, pengiriman dilanjutkan tanpa tracking dan tanpa validasi External-ID. Header tracking dibersihkan sebelum pengiriman ke penerima. Kredensial valid tetap memerlukan tepat satu External-ID yang valid. Gangguan database autentikasi menghasilkan kegagalan SMTP sementara agar client dapat retry. Untuk membaca status, isi variabel dari kredensial aplikasi dan gunakan External-ID yang sama persis, termasuk nol di depan.
+Saat submission SMTP terautentikasi, tambahkan header pesan `External-ID`, `App-Key`, dan `App-Token`. Stalwart memverifikasi kredensial aplikasi sebelum mengambil nilai External-ID. Jika kredensial tidak lengkap, tidak valid, atau tidak ditemukan, pengiriman dilanjutkan tanpa tracking dan tanpa validasi External-ID. App-Key dan App-Token dibersihkan sebelum pengiriman ke penerima. External-ID hanya diambil dan dihapus ketika tracking aktif, sehingga header tersebut pada email tanpa tracking tetap dipertahankan. Kredensial valid tetap memerlukan tepat satu External-ID yang valid. Gangguan database autentikasi menghasilkan kegagalan SMTP sementara agar client dapat retry. Untuk membaca status, isi variabel dari kredensial aplikasi dan gunakan External-ID yang sama persis, termasuk nol di depan.
 
 ```bash
 curl -i -H "App-Key: $APP_KEY" -H "App-Token: $APP_TOKEN" \

@@ -124,7 +124,8 @@ paths:
         Application credentials are verified before extracting External-ID. Missing, invalid, or unknown
         credentials disable tracking without rejecting the email or validating External-ID.
         Valid credentials require exactly one valid External-ID. Registry failures return a temporary SMTP error.
-        The server removes all three tracking headers before outbound delivery. Reusing an External-ID
+        The server removes App-Key and App-Token before outbound delivery. External-ID is removed only
+        when tracking is active and is preserved on untracked mail. Reusing an External-ID
         within one app returns the recipients of every matching queue ID. Results persist
         after SMTP queue removal. Each status transition is also POSTed as one DeliveryEvent
         as JSON to the registered URL using its configured webhook authentication.
