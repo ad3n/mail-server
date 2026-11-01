@@ -36,6 +36,7 @@ pub mod submission;
 pub mod tenant;
 // SPDX-SnippetEnd
 pub mod throttle;
+pub mod tracking;
 pub mod walk;
 
 pub type QueueId = u64;
@@ -125,6 +126,7 @@ impl Message {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageWrapper {
+    pub previous_status: Vec<(QueueName, &'static str)>,
     pub queue_id: QueueId,
     pub queue_name: QueueName,
     pub is_multi_queue: bool,
@@ -147,6 +149,7 @@ pub enum Metadata {
     QueueCount { key: u128, id: u64 },
     Headers { value: Box<[u8]>, id: u64 },
     Submission { account_id: u32 },
+    Tracking(Box<tracking::Tracking>),
 }
 
 #[derive(

@@ -21,6 +21,115 @@ security:
   - bearerAuth: []
   - basicAuth: []
 paths:
+  /api/integrations/manage:
+    get:
+      summary: Open the integrated applications administration page as a system administrator
+      responses:
+        '200': {description: HTML page that uses authenticated app management endpoints}
+  /api/integrations/apps:
+    get:
+      summary: List integrated applications as a system administrator
+      responses:
+        '200':
+          description: Registered applications
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/IntegratedApp'}}
+    post:
+      summary: Generate an App-ID and register an integration as a system administrator
+      requestBody: {$ref: '#/components/requestBodies/IntegratedAppInput'}
+      responses:
+        '201':
+          description: Created application with its server-generated immutable App-ID and copyable app credentials
+          headers:
+            App-Key: {schema: {type: string}}
+            App-Token: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IntegratedApp'}
+  /api/integrations/apps/{appId}:
+    parameters:
+      - {$ref: '#/components/parameters/TrackingAppId'}
+    get:
+      summary: Read an application as a system administrator
+      responses:
+        '200':
+          description: Registered application
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IntegratedApp'}
+        '404': {description: Unknown or inaccessible application}
+    put:
+      summary: Update the application name or callback URL
+      requestBody: {$ref: '#/components/requestBodies/IntegratedAppInput'}
+      responses:
+        '204': {description: Updated}
+    delete:
+      summary: Delete an integration as a system administrator
+      responses:
+        '204': {description: Integration deleted.}
+  /api/integrations/apps/{appId}/credentials:
+    parameters:
+      - {$ref: '#/components/parameters/TrackingAppId'}
+    get:
+      summary: Retrieve the app credentials for copying as an authenticated system administrator
+      responses:
+        '200':
+          description: Credentials for the selected integration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [appKey, appToken]
+                properties:
+                  appKey: {type: string}
+                  appToken: {type: string}
+  /api/integrations/apps/{appId}/credentials/regenerate:
+    parameters:
+      - {$ref: '#/components/parameters/TrackingAppId'}
+    post:
+      summary: Atomically replace both credentials for an integration as a system administrator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Generated pair. Subsequent requests must use both new values.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [appKey, appToken]
+                properties:
+                  appKey: {type: string}
+                  appToken: {type: string}
+        '409': {description: The integration changed during rotation}
+  /api/integrations/deliveries/{externalId}:
+    parameters:
+      - {in: path, name: externalId, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      summary: Look up delivery status by External-ID
+      security:
+        - integrationApiKey: []
+          integrationToken: []
+      description: |
+        Submit App-Key, App-Token and External-ID message headers using authenticated SMTP.
+        IDs are case sensitive and support ASCII letters, digits, dots, underscores and hyphens.
+        The server removes all three tracking headers before outbound delivery. Reusing an External-ID
+        within one app returns the recipients of every matching queue ID. Results persist
+        after SMTP queue removal. Each status transition is also POSTed as one DeliveryEvent
+        to the exact registered URL with App-Key and App-Token headers.
+        Lookup uses the same headers. Callback retries reuse eventId and can arrive out of order.
+      responses:
+        '200':
+          description: Latest persisted status per queue ID and recipient
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/AppDeliveryEvent'}}
+        '401': {description: Invalid App-Key or App-Token}
+        '404': {description: No accessible results for this application and identifier}
   /api/auth:
     post:
       operationId: login
@@ -363,7 +472,33 @@ paths:
           description: Enterprise feature not available in this edition
 
 components:
+  parameters:
+    TrackingAppId:
+      in: path
+      name: appId
+      required: true
+      schema: {type: string, maxLength: 128}
+  requestBodies:
+    IntegratedAppInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name, webhookUrl]
+            properties:
+              name: {type: string, minLength: 1, maxLength: 128}
+              webhookUrl: {type: string, format: uri, description: Public HTTPS callback URL}
   securitySchemes:
+    integrationApiKey:
+      type: apiKey
+      in: header
+      name: App-Key
+    integrationToken:
+      type: apiKey
+      in: header
+      name: App-Token
+      description: Token issued when creating the delivery integration.
     bearerAuth:
       type: http
       scheme: bearer
@@ -420,6 +555,26 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
 
   schemas:
+    IntegratedApp:
+      type: object
+      properties:
+        appId: {type: string}
+        name: {type: string}
+        webhookUrl: {type: string, format: uri}
+    AppDeliveryEvent:
+      type: object
+      required: [eventId, appId, externalId, queueId, recipient, status, updatedAt, details]
+      properties:
+        eventId: {type: string, description: Stable across retries of this callback}
+        appId: {type: string}
+        externalId: {type: string}
+        queueId: {type: string, description: Hexadecimal SMTP queue identifier}
+        recipient: {type: string}
+        status: {type: string, enum: [queued, deferred, accepted, failed, removed]}
+        updatedAt: {type: integer, format: int64, description: Unix timestamp in seconds}
+        details: {type: string, description: SMTP reply or diagnostic when available}
+        smtpCode: {type: integer, description: SMTP response code when available}
+        hostname: {type: string, description: Server that accepted delivery when available}
     LoginRequest:
       type: object
       description: |

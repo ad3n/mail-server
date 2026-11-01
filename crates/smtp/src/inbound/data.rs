@@ -74,7 +74,80 @@ impl MessageOrigin {
     }
 }
 
+fn take_tracking_headers(
+    raw: &mut Vec<u8>,
+) -> Result<Option<(String, String, String)>, &'static [u8]> {
+    use common::delivery_tracking::valid_id;
+    let Some(message) = MessageParser::new().parse_headers(raw) else {
+        return Ok(None);
+    };
+    let headers = message.headers();
+    if !headers.iter().any(|h| {
+        let name = h.name();
+        name.as_str().eq_ignore_ascii_case("App-Key")
+            || name.as_str().eq_ignore_ascii_case("App-Token")
+    }) {
+        return Ok(None);
+    }
+    let mut app_key = None;
+    let mut app_token = None;
+    let mut external_id = None;
+    let mut ranges = Vec::new();
+    for h in headers.iter() {
+        let name = h.name();
+        let slot = if name.as_str().eq_ignore_ascii_case("App-Key") {
+            &mut app_key
+        } else if name.as_str().eq_ignore_ascii_case("App-Token") {
+            &mut app_token
+        } else if name.as_str().eq_ignore_ascii_case("External-ID") {
+            &mut external_id
+        } else {
+            continue;
+        };
+        let value = std::str::from_utf8(&raw[h.offset_start() as usize..h.offset_end() as usize])
+            .unwrap_or("")
+            .trim();
+        if slot.is_some() || !valid_id(value) {
+            return Err(b"550 5.6.0 Invalid tracking header.\r\n");
+        }
+        *slot = Some(value.to_owned());
+        ranges.push(h.offset_field() as usize..h.offset_end() as usize);
+    }
+    let (Some(app_key), Some(app_token), Some(external_id)) = (app_key, app_token, external_id)
+    else {
+        return Err(b"550 5.6.0 App-Key, App-Token and External-ID must appear together.\r\n");
+    };
+    for range in ranges.into_iter().rev() {
+        raw.drain(range);
+    }
+    Ok(Some((app_key, app_token, external_id)))
+}
+
 impl<T: SessionStream> Session<T> {
+    async fn extract_tracking(
+        &self,
+        mut raw: Vec<u8>,
+    ) -> Result<(Vec<u8>, Option<queue::tracking::Tracking>), &'static [u8]> {
+        use common::delivery_tracking::authenticate_app;
+        let Some((key, token, external_id)) = take_tracking_headers(&mut raw)? else {
+            return Ok((raw, None));
+        };
+        if !self.is_authenticated() {
+            return Err(b"550 5.7.1 Tracking requires authenticated submission.\r\n");
+        }
+        let app_id = authenticate_app(self.server.store(), &key, &token)
+            .await
+            .map_err(|_| &b"451 4.3.0 App registry unavailable.\r\n"[..])?
+            .ok_or(&b"550 5.7.1 Invalid app credentials.\r\n"[..])?;
+        Ok((
+            raw,
+            Some(queue::tracking::Tracking {
+                app_id,
+                external_id,
+            }),
+        ))
+    }
+
     pub async fn queue_message(&mut self, origin: MessageOrigin) -> Cow<'static, [u8]> {
         // Parse message
         let raw_message = std::mem::take(&mut self.data.message);
@@ -94,6 +167,10 @@ impl<T: SessionStream> Session<T> {
                 Some(memory)
             }
             None => None,
+        };
+        let (raw_message, tracking) = match self.extract_tracking(raw_message).await {
+            Ok(result) => result,
+            Err(reply) => return reply.into(),
         };
         let parsed_message = match MessageParser::new()
             .parse(&raw_message)
@@ -890,7 +967,8 @@ impl<T: SessionStream> Session<T> {
                     .with_dkim2_verified(dkim2_verified)
                     .with_exploded(sieve_redirected)
                     .with_quotas(quotas)
-                    .with_metadata(origin.metadata()),
+                    .with_metadata(origin.metadata())
+                    .with_metadata(tracking.map(|t| Metadata::Tracking(Box::new(t)))),
             )
             .await
         {
@@ -1054,6 +1132,7 @@ impl<T: SessionStream> Session<T> {
         }
 
         MessageWrapper {
+            previous_status: Vec::new(),
             queue_id,
             queue_name: QueueName::default(),
             is_multi_queue: false,
@@ -1256,5 +1335,32 @@ fn parse_dkim2_dsn<'x, 'r>(
         ))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    use super::take_tracking_headers;
+
+    #[test]
+    fn private_headers_are_removed_only_from_the_envelope_message_headers() {
+        let mut raw = b"Subject: Hi\r\naPp-Key: sales\r\nApp-Token: secret\r\nMessage-ID: <one@example.com>\r\nExternal-ID: 00042\r\n\r\nApp-ID: body\r\n".to_vec();
+        assert_eq!(
+            take_tracking_headers(&mut raw).unwrap(),
+            Some(("sales".into(), "secret".into(), "00042".into()))
+        );
+        assert_eq!(
+            raw,
+            b"Subject: Hi\r\nMessage-ID: <one@example.com>\r\n\r\nApp-ID: body\r\n"
+        );
+        assert!(take_tracking_headers(&mut raw).unwrap().is_none());
+        for invalid in [
+            "App-Key: sales\r\n",
+            "App-Key: sales\r\nExternal-ID: a\r\nExternal-ID: b\r\n",
+            "App-Key: ../x\r\nExternal-ID: 3\r\n",
+        ] {
+            let mut raw = format!("From: a@example.com\r\n{invalid}\r\n").into_bytes();
+            assert!(take_tracking_headers(&mut raw).is_err());
+        }
     }
 }

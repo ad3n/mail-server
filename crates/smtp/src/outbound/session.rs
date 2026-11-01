@@ -244,14 +244,7 @@ impl MessageWrapper {
                                 Elapsed = time.elapsed(),
                             );
 
-                            accepted_rcpts.push((
-                                rcpt,
-                                rcpt_idx,
-                                Status::Completed(Box::new(HostResponse {
-                                    hostname: params.hostname.into(),
-                                    response: response.into_box(),
-                                })),
-                            ));
+                            accepted_rcpts.push((rcpt, rcpt_idx));
                         }
                         severity => {
                             trc::event!(
@@ -334,17 +327,22 @@ impl MessageWrapper {
                     Ok(response) => {
                         // Mark recipients as delivered
                         if response.code() == 250 {
-                            for (rcpt, rcpt_idx, status) in accepted_rcpts {
+                            let response = response.into_box();
+                            for (rcpt, rcpt_idx) in accepted_rcpts {
                                 trc::event!(
                                     Delivery(DeliveryEvent::Delivered),
                                     SpanId = params.session_id,
                                     Hostname = CompactString::from(params.hostname),
                                     To = CompactString::from(rcpt.address()),
                                     Code = response.code,
-                                    Details = CompactString::from(&response.message),
+                                    Details = CompactString::from(&*response.message),
                                     Elapsed = time.elapsed(),
                                 );
 
+                                let status = Status::Completed(Box::new(HostResponse {
+                                    hostname: params.hostname.into(),
+                                    response: response.clone(),
+                                }));
                                 statuses.push(DeliveryResult::account(status, rcpt_idx));
                             }
                         } else {
@@ -390,7 +388,7 @@ impl MessageWrapper {
                     .await
                 {
                     Ok(responses) => {
-                        for ((rcpt, rcpt_idx, _), response) in
+                        for ((rcpt, rcpt_idx), response) in
                             accepted_rcpts.into_iter().zip(responses)
                         {
                             let status: Status<HostResponse<Box<str>>, ErrorDetails> =

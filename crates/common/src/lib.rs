@@ -738,3 +738,5 @@ pub const DEFAULT_LOGO_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAMgAAAAnCAMAAAB9l
     vDslX61U5vMS4szsDPY+S0+vvL7lAoNeZ4kZeHQaesNIYvz8uCg7AzUzWpwNNJRWkVZceur/vSUf\r\n\
     GAtDCZrI0KAvoeG/Lt9Xx5MfIhFiicj9QSmhGd649zg098nPik+rB+/T/k/yO9A7bEvKcQkCAAAA\r\n\
     AElFTkSuQmCC";
+
+pub mod delivery_tracking;

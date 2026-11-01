@@ -11,6 +11,7 @@
 pub mod telemetry;
 // SPDX-SnippetEnd
 pub mod diagnose;
+mod integrations;
 
 use crate::{
     api::diagnose::{DeliveryStage, DeliveryTarget, spawn_delivery_diagnose},
@@ -62,6 +63,71 @@ impl ManagementApi for Server {
         req: &mut HttpRequest,
         session: &HttpSessionData,
     ) -> trc::Result<HttpResponse> {
+        if req.uri().path().starts_with("/api/integrations/") {
+            let route = req
+                .uri()
+                .path()
+                .trim_start_matches("/api/integrations/")
+                .to_owned();
+            if req.method() == Method::GET && route == "manage" {
+                if !req.headers().contains_key(header::AUTHORIZATION) {
+                    return Ok(HttpResponse::new(StatusCode::UNAUTHORIZED)
+                        .with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE)
+                        .with_no_store());
+                }
+                let auth = self.authenticate_headers(req, session).await?;
+                if !integrations::is_admin(auth.access_token)? {
+                    return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+                }
+                return Ok(HttpResponse::new(StatusCode::OK)
+                    .with_content_type("text/html; charset=utf-8")
+                    .with_cache_control("no-store")
+                    .with_text_body(include_str!(
+                        "../../../../resources/html-templates/integrations.html"
+                    )));
+            }
+            if let Some(external_id) = route.strip_prefix("deliveries/") {
+                if req.method() != Method::GET {
+                    return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED));
+                }
+                self.is_http_anonymous_request_allowed(session.remote_ip)
+                    .await?;
+                let key = req
+                    .headers()
+                    .get("app-key")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default();
+                let token = req
+                    .headers()
+                    .get("app-token")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default();
+                return integrations::lookup(self, external_id, key, token).await;
+            }
+            let auth = self.authenticate_headers(req, session).await?;
+            let body = if matches!(*req.method(), Method::POST | Method::PUT) {
+                if req
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.split(';').next())
+                    != Some("application/json")
+                {
+                    return Ok(HttpResponse::new(StatusCode::UNSUPPORTED_MEDIA_TYPE));
+                }
+                fetch_body(req, 8192, session.session_id).await
+            } else {
+                None
+            };
+            return integrations::handle(
+                self,
+                auth.access_token,
+                &route.split('/').collect::<Vec<_>>(),
+                req.method(),
+                body.as_deref(),
+            )
+            .await;
+        }
         let is_post = req.method() == Method::POST;
         let body = if is_post {
             fetch_body(req, 1024 * 1024, session.session_id).await

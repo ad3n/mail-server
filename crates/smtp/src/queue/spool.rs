@@ -116,6 +116,7 @@ impl SmtpSpool for Server {
             .map_or(0, |d| d.as_secs());
 
         MessageWrapper {
+            previous_status: Vec::new(),
             queue_id: self.inner.data.queue_id_gen.generate(),
             queue_name: QueueName::default(),
             is_multi_queue: false,
@@ -242,6 +243,7 @@ impl SmtpSpool for Server {
 impl MessageWrapper {
     pub fn new(message: Message, queue_id: QueueId, queue_name: QueueName) -> Self {
         MessageWrapper {
+            previous_status: message.delivery_snapshot(),
             is_multi_queue: message
                 .recipients
                 .iter()
@@ -511,6 +513,8 @@ impl MessageWrapper {
         // Write message to queue
         let mut batch = BatchBuilder::new();
 
+        self.record_tracking(server, &mut batch, false, None);
+
         // Reserve quotas
         for quota in &quotas {
             quota.reserve(&mut batch, self.message.size);
@@ -764,6 +768,12 @@ impl MessageWrapper {
     ) -> bool {
         // Release quota for completed deliveries
         let mut batch = BatchBuilder::new();
+        self.record_tracking(
+            server,
+            &mut batch,
+            false,
+            self.is_multi_queue.then_some(self.queue_name),
+        );
         let released_quotas = self.release_quota(&mut batch);
 
         // Update message queue
@@ -818,7 +828,9 @@ impl MessageWrapper {
                                 | Metadata::QueueSize { id, .. } => {
                                     released_quotas.binary_search(id).is_err()
                                 }
-                                Metadata::Headers { .. } | Metadata::Submission { .. } => true,
+                                Metadata::Tracking(_)
+                                | Metadata::Headers { .. }
+                                | Metadata::Submission { .. } => true,
                             });
                             cur_message.metadata = metadata.into_boxed_slice();
                         }
@@ -897,7 +909,7 @@ impl MessageWrapper {
                         -(self.message.size as i64),
                     );
                 }
-                Metadata::Headers { .. } | Metadata::Submission { .. } => {}
+                Metadata::Tracking(_) | Metadata::Headers { .. } | Metadata::Submission { .. } => {}
             }
         }
 
@@ -907,6 +919,7 @@ impl MessageWrapper {
                 to: BlobLink::Id { id: self.queue_id },
             })
             .clear(ValueClass::Queue(QueueClass::Message(self.queue_id)));
+        self.record_tracking(server, &mut batch, true, None);
         self.write_delivery_results(&mut batch);
 
         let result = match server.store().write_batch(&mut batch).await {
@@ -948,6 +961,7 @@ impl MessageWrapper {
     ) -> RegistryWrite {
         let mut write = LockedWrite::new(self.queue_id, self.span_id, &self.message);
         let batch = &mut write.batch;
+        self.record_tracking(server, batch, false, None);
         let released_quotas = self.release_quota(batch);
 
         for (queue_name, due) in prev_events {
@@ -993,7 +1007,9 @@ impl MessageWrapper {
                             Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. } => {
                                 released_quotas.binary_search(id).is_err()
                             }
-                            Metadata::Headers { .. } | Metadata::Submission { .. } => true,
+                            Metadata::Tracking(_)
+                            | Metadata::Headers { .. }
+                            | Metadata::Submission { .. } => true,
                         });
                         cur_message.metadata = metadata.into_boxed_slice();
                     }
@@ -1040,6 +1056,7 @@ impl MessageWrapper {
         }
         // SPDX-SnippetEnd
 
+        self.record_tracking(server, batch, true, None);
         self.write_delivery_results(batch);
         for metadata in self.message.metadata {
             match metadata {
@@ -1052,7 +1069,7 @@ impl MessageWrapper {
                         -(self.message.size as i64),
                     );
                 }
-                Metadata::Headers { .. } | Metadata::Submission { .. } => {}
+                Metadata::Tracking(_) | Metadata::Headers { .. } | Metadata::Submission { .. } => {}
             }
         }
 

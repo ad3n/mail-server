@@ -17,6 +17,7 @@ use state_manager::manager::spawn_push_router;
 use std::sync::Arc;
 
 pub mod broadcast;
+mod delivery_callbacks;
 pub mod index_queue;
 pub mod state_manager;
 pub mod task_manager;
@@ -48,6 +49,8 @@ impl StartServices for BootManager {
 impl SpawnServices for IpcReceivers {
     fn spawn_services(&mut self, inner: Arc<Inner>) {
         if !inner.shared_core.load().storage.registry.is_recovery_mode() {
+            delivery_callbacks::spawn(inner.clone());
+
             // Spawn push manager
             spawn_push_router(inner.clone(), self.push_rx.take().unwrap());
 

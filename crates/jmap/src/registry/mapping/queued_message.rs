@@ -124,6 +124,7 @@ pub(crate) async fn queued_message_set(
         let mut has_changes = false;
         let mut modified_rcpts = AHashSet::new();
         let mut queued_message = archived_message.deserialize()?;
+        let previous_status = queued_message.delivery_snapshot();
         let prev_events = queued_message.next_events();
         if queued_message.env_id.as_deref() != message.env_id.as_deref() {
             queued_message.env_id = message.env_id.as_deref().map(|v| v.into());
@@ -220,7 +221,8 @@ pub(crate) async fn queued_message_set(
 
         if has_changes {
             // Delete message if there are no pending deliveries
-            let message = MessageWrapper::new(queued_message, queue_id, QueueName::default());
+            let mut message = MessageWrapper::new(queued_message, queue_id, QueueName::default());
+            message.previous_status = previous_status;
             let queues = message
                 .message
                 .recipients

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="id">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aplikasi terintegrasi · Stalwart</title>
+<style>
+body{font:1rem/1.5 system-ui;max-width:56rem;margin:3rem auto;padding:0 1rem;color:#182839}fieldset{border:1px solid #bcc7cc;margin:1.25rem 0;padding:1rem}label{display:block;margin:.6rem 0}input{display:block;padding:.45rem;width:min(95%,34rem)}button{padding:.4rem .8rem;margin:.2rem}li{overflow-wrap:anywhere;margin:.5rem 0}output{display:block;font-weight:600}
+</style>
+<h1>Aplikasi terintegrasi</h1>
+<button id="refresh">Muat ulang daftar</button>
+<ul id="apps"></ul>
+<form id="editor"><fieldset><legend id="legend">Tambah aplikasi</legend>
+<label>Name <input id="name" required maxlength="128" placeholder="Misalnya Billing"></label>
+<label>Webhook URL (HTTPS) <input id="url" type="url" required></label>
+<button>Simpan</button><button type="reset">Batalkan</button>
+</fieldset></form>
+<section id="created" hidden><h2 id="credTitle">Kredensial aplikasi</h2><p>Salin pasangan App-Key dan App-Token untuk integrasi ini.</p>
+<label>App-Key <input id="apiKey" readonly></label><button id="copyKey">Salin App-Key</button>
+<label>App-Token <input id="apiToken" type="password" readonly></label><button id="copyToken">Salin App-Token</button></section>
+<output id="notice" role="status"></output>
+<script>
+const el = id => document.getElementById(id);
+const base = '/api/integrations/apps';
+let editingId = null;
+let shownId = null;
+
+async function request(path, method = 'GET', data) {
+  const response = await fetch(path, {
+    method, credentials: 'same-origin', cache: 'no-store',
+    headers: data ? {'Content-Type': 'application/json'} : {},
+    body: data && JSON.stringify(data)
+  });
+  if (!response.ok) throw new Error('Permintaan gagal (HTTP '+response.status+').');
+  if (response.status === 200) return response.json();
+  if (response.status === 201) {
+    const app = await response.json();
+    showCredentials(app, response.headers.get('App-Key'), response.headers.get('App-Token'));
+  }
+}
+function showCredentials(app, key, token) {
+  shownId = app.appId;
+  el('credTitle').textContent = 'Kredensial '+app.name;
+  el('apiKey').value = key;
+  el('apiToken').value = token;
+  el('created').hidden = false;
+}
+async function action(fn) {
+  try { el('notice').textContent = ''; await fn(); }
+  catch (e) { el('notice').textContent = e.message; }
+}
+function button(label, fn) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.onclick = async () => {
+    b.disabled = true;
+    try { await action(fn); }
+    finally { b.disabled = false; }
+  };
+  return b;
+}
+async function copy(field) {
+  try { await navigator.clipboard.writeText(field.value); el('notice').textContent='Disalin.'; }
+  catch { field.focus(); field.select(); el('notice').textContent='Tekan Ctrl+C atau ⌘C untuk menyalin.'; }
+}
+el('copyKey').onclick = () => copy(el('apiKey'));
+el('copyToken').onclick = () => copy(el('apiToken'));
+
+async function refresh() {
+  const apps = await request(base);
+  el('apps').replaceChildren(...apps.map(app => {
+    const row = document.createElement('li');
+    const path = base+'/'+encodeURIComponent(app.appId);
+    row.append(app.name+' · '+app.webhookUrl+' ',
+      button('Kredensial', async () => {
+        const c = await request(path+'/credentials');
+        showCredentials(app,c.appKey,c.appToken);
+      }),
+      button('Regenerate kredensial', async () => {
+        if (!confirm('Ganti App-Key dan App-Token untuk '+app.name+'? Kredensial lama akan langsung dinonaktifkan.')) return;
+        const c = await request(path+'/credentials/regenerate','POST',{});
+        showCredentials(app,c.appKey,c.appToken);
+        el('notice').textContent = 'Kredensial baru siap disalin.';
+      }),
+      button('Edit', () => {
+        editingId = app.appId;
+        el('name').value = app.name;
+        el('url').value = app.webhookUrl;
+        el('legend').textContent = 'Edit aplikasi';
+      }),
+      button('Hapus', async () => {
+        if (!confirm('Hapus integrasi '+app.name+'?')) return;
+        await request(path,'DELETE');
+        if (shownId === app.appId) {
+          shownId = null;
+          el('created').hidden = true;
+          el('apiKey').value = el('apiToken').value = '';
+        }
+        if (editingId === app.appId) el('editor').reset();
+        await refresh();
+      }));
+    return row;
+  }));
+}
+el('refresh').onclick = () => action(refresh);
+el('editor').onreset = () => { editingId=null; el('legend').textContent='Tambah aplikasi'; };
+el('editor').onsubmit = e => {
+  e.preventDefault();
+  return action(async () => {
+    const data = {name:el('name').value.trim(), webhookUrl:el('url').value};
+    await request(editingId ? base+'/'+encodeURIComponent(editingId) : base, editingId ? 'PUT' : 'POST', data);
+    el('editor').reset();
+    await refresh();
+    el('notice').textContent='Tersimpan.';
+  });
+};
+action(refresh);
+</script>
+</html>
