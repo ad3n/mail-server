@@ -1,0 +1,61 @@
+diff --git a/src/components/layout/MainContent.tsx b/src/components/layout/MainContent.tsx
+index fb8ba87..30a700f 100644
+--- a/src/components/layout/MainContent.tsx
++++ b/src/components/layout/MainContent.tsx
+@@ -23,6 +23,11 @@ function lazyFeature<M, P>(load: () => Promise<M>, select: (module: M) => Compon
+   return lazy(() => load().then((module) => ({ default: select(module) })));
+ }
+ 
++const IntegrationApps = lazyFeature(
++  () => import('@/features/integrations/IntegrationApps'),
++  (m) => m.IntegrationApps,
++);
++
+ const DeliveryTracePage = lazyFeature(
+   () => import('@/features/troubleshoot/DeliveryTracePage'),
+   (m) => m.DeliveryTracePage,
+@@ -97,6 +102,7 @@ function renderView(
+       return <DashboardView dashboardId={firstId} section={section ?? ''} />;
+     }
+     // SPDX-SnippetEnd
++    if (componentName === 'IntegrationApps' && permissions.hasPermission('sysSystemSettingsUpdate')) return <IntegrationApps />;
+     if (componentName === 'LiveDelivery') {
+       return <DeliveryTracePage />;
+     }
+diff --git a/src/lib/layout.ts b/src/lib/layout.ts
+index f1c6cd7..74eaede 100644
+--- a/src/lib/layout.ts
++++ b/src/lib/layout.ts
+@@ -23,6 +23,7 @@ interface CustomComponentRule {
+ }
+ 
+ const CUSTOM_COMPONENTS: Record<string, CustomComponentRule> = {
++  IntegrationApps: { permission: 'sysSystemSettingsUpdate' },
+   LiveDelivery: { permission: 'liveDeliveryTest' },
+   // SPDX-SnippetBegin
+   // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+diff --git a/src/services/jmap/client.ts b/src/services/jmap/client.ts
+index e0d26c6..1d184b2 100644
+--- a/src/services/jmap/client.ts
++++ b/src/services/jmap/client.ts
+@@ -310,8 +310,18 @@ export function fetchSession(signal?: AbortSignal): Promise<JmapSession> {
+   return apiFetchJson<JmapSession>('/jmap/session', { signal });
+ }
+ 
+-export function fetchSchema(signal?: AbortSignal): Promise<Schema> {
+-  return apiFetchJson<Schema>('/api/schema', { signal });
++export async function fetchSchema(signal?: AbortSignal): Promise<Schema> {
++  const schema = await apiFetchJson<Schema>('/api/schema', { signal });
++  const management = schema.layouts.find(layout => layout.name === 'Management');
++  const directory = management?.items.find(item => 'container' in item && item.container.name === 'Directory');
++  if (directory && 'container' in directory) {
++    const items = directory.container.items;
++    const oauth = items.findIndex(item => item.type === 'link' && item.viewName === 'x:OAuthClient');
++    items.splice(oauth < 0 ? items.length : oauth + 1, 0, {
++      type: 'link', name: 'Apps', viewName: 'CustomComponent/IntegrationApps',
++    });
++  }
++  return schema;
+ }
+ 
+ export interface AccountInfoResponse {

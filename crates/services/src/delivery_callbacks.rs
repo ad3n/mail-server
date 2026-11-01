@@ -70,20 +70,21 @@ async fn deliver(
         }
     }
 
-    if let Some(app) = delivery_get::<IntegratedApp>(store, &app_key(&callback.app_id)).await? {
-        let credentials = delivery_get::<AppCredentials>(store, &credential_key(&app.app_id))
-            .await?
+    if let Some(app) = delivery_get::<StoredApp>(store, &app_key(&callback.app_id)).await? {
+        let headers = app
+            .app
+            .webhook_auth
+            .headers(&app.webhook_secrets)
             .ok_or_else(|| {
                 trc::StoreEvent::DataCorruption
                     .into_err()
-                    .details("Delivery webhook credentials missing")
+                    .details("Invalid webhook authentication settings")
             })?;
-        let sent = match client.request(reqwest::Method::POST, &app.webhook_url) {
+        let sent = match client.request(reqwest::Method::POST, &app.app.webhook_url) {
             Ok(request) => request
+                .headers(headers)
                 .timeout(Duration::from_secs(10))
                 .header("Content-Type", "application/json")
-                .header("app-key", &credentials.api_key)
-                .header("app-token", &credentials.token)
                 .body(serde_json::to_vec(&callback).expect("serializable delivery event"))
                 .send()
                 .await
@@ -121,34 +122,38 @@ mod tests {
         let url = format!("http://{}/status", listener.local_addr().unwrap());
         let receiver = tokio::spawn(async move {
             let mut bodies = Vec::new();
-            for (status, key, token) in [
-                ("503 Service Unavailable", "test-key", "test-token"),
-                ("204 No Content", "rotated-key", "rotated-token"),
-            ] {
+            for status in ["503 Service Unavailable", "204 No Content"] {
                 let (socket, _) = listener.accept().await.unwrap();
                 let mut socket = BufReader::new(socket);
                 let mut length = 0;
-                let mut authenticated = (false, false);
+                let mut custom_headers = (None, None);
                 loop {
                     let mut line = String::new();
                     assert_ne!(socket.read_line(&mut line).await.unwrap(), 0);
                     if line == "\r\n" {
                         break;
                     }
-                    match line.trim_end().split_once(": ") {
-                        Some((k, v)) if k.eq_ignore_ascii_case("app-key") && v == key => {
-                            authenticated.0 = true
+                    if let Some((name, value)) = line.split_once(':') {
+                        match name.to_ascii_lowercase().as_str() {
+                            "x-tenant-key" => custom_headers.0 = Some(value.trim().to_owned()),
+                            "x-hook-token" => custom_headers.1 = Some(value.trim().to_owned()),
+                            _ => {}
                         }
-                        Some((k, v)) if k.eq_ignore_ascii_case("app-token") && v == token => {
-                            authenticated.1 = true
-                        }
-                        _ => {}
+                        assert!(!name.eq_ignore_ascii_case("app-key"));
+                        assert!(!name.eq_ignore_ascii_case("app-token"));
                     }
                     if let Some(n) = line.to_ascii_lowercase().strip_prefix("content-length:") {
                         length = n.trim().parse().unwrap();
                     }
                 }
-                assert_eq!(authenticated, (true, true));
+                if status.starts_with("204") {
+                    assert_eq!(
+                        custom_headers,
+                        (Some("receiver-key".into()), Some("receiver-token".into()))
+                    );
+                } else {
+                    assert_eq!(custom_headers, (None, None));
+                }
                 let mut body = vec![0; length];
                 socket.read_exact(&mut body).await.unwrap();
                 bodies.push(body);
@@ -169,6 +174,7 @@ mod tests {
             app_id: "sales".into(),
             name: "Sales".into(),
             webhook_url: url,
+            webhook_auth: WebhookAuth::None,
         };
         let callback = DeliveryEvent {
             event_id: "unique".into(),
@@ -207,16 +213,23 @@ mod tests {
                 .unwrap();
         assert_eq!(pending.len(), 1);
         let (key, job) = pending.pop().unwrap();
-        let mut rotation = BatchBuilder::new();
-        put(
-            &mut rotation,
-            &credential_key("sales"),
-            &AppCredentials {
-                api_key: "rotated-key".into(),
-                token: "rotated-token".into(),
+        let configured = StoredApp {
+            app: IntegratedApp {
+                webhook_auth: WebhookAuth::ApiKeyToken {
+                    key_header: "X-Tenant-Key".into(),
+                    token_header: "X-Hook-Token".into(),
+                },
+                ..app
             },
-        );
-        store.write_batch(&mut rotation).await.unwrap();
+            webhook_secrets: WebhookSecrets {
+                api_key: "receiver-key".into(),
+                token: "receiver-token".into(),
+                ..Default::default()
+            },
+        };
+        let mut batch = BatchBuilder::new();
+        put(&mut batch, &app_key("sales"), &configured);
+        store.write_batch(&mut batch).await.unwrap();
         deliver(&store, &client, key, job).await.unwrap();
         let bodies = receiver.await.unwrap();
         assert_eq!(bodies[0], bodies[1]);
@@ -224,6 +237,9 @@ mod tests {
         assert_eq!(payload["externalId"], "00042");
         assert_eq!(payload["eventId"], "unique");
         assert!(payload.get("events").is_none());
+        let body = std::str::from_utf8(&bodies[0]).unwrap();
+        assert!(!body.contains("test-key"));
+        assert!(!body.contains("test-token"));
         assert!(
             delivery_range::<DeliveryEvent>(&store, "delivery/outbox/", "delivery/outbox/~", 10)
                 .await

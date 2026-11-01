@@ -20,6 +20,10 @@ use utils::outbound::OutboundPolicy;
 struct AppInput {
     name: String,
     webhook_url: String,
+    #[serde(default)]
+    webhook_auth: Option<WebhookAuth>,
+    #[serde(default)]
+    webhook_secrets: WebhookSecrets,
 }
 
 impl AppInput {
@@ -38,21 +42,64 @@ impl AppInput {
                 .is_ok())
         .then_some(input)
     }
+
+    fn into_record(self, id: &str, current: Option<StoredApp>) -> Option<StoredApp> {
+        let (old_auth, old_secrets, same_url) = match current {
+            Some(old) => (
+                old.app.webhook_auth,
+                old.webhook_secrets,
+                old.app.webhook_url == self.webhook_url,
+            ),
+            None => (WebhookAuth::None, WebhookSecrets::default(), false),
+        };
+        let auth = self.webhook_auth.unwrap_or_else(|| old_auth.clone());
+        let mut secrets = self.webhook_secrets;
+        if same_url && std::mem::discriminant(&auth) == std::mem::discriminant(&old_auth) {
+            if secrets.password.is_empty() {
+                secrets.password = old_secrets.password;
+            }
+            if secrets.api_key.is_empty() {
+                secrets.api_key = old_secrets.api_key;
+            }
+            if secrets.token.is_empty() {
+                secrets.token = old_secrets.token;
+            }
+        }
+        if (!matches!(auth, WebhookAuth::Basic { .. }) && !secrets.password.is_empty())
+            || (!matches!(
+                auth,
+                WebhookAuth::ApiKey { .. } | WebhookAuth::ApiKeyToken { .. }
+            ) && !secrets.api_key.is_empty())
+            || (!matches!(auth, WebhookAuth::Bearer | WebhookAuth::ApiKeyToken { .. })
+                && !secrets.token.is_empty())
+        {
+            return None;
+        }
+        auth.headers(&secrets)?;
+        Some(StoredApp {
+            app: IntegratedApp {
+                app_id: id.into(),
+                name: self.name,
+                webhook_url: self.webhook_url,
+                webhook_auth: auth,
+            },
+            webhook_secrets: secrets,
+        })
+    }
 }
 
-fn generate_id(prefix: &str) -> String {
-    let suffix: String = rng()
+fn generate_id() -> String {
+    rng()
         .sample_iter(Alphanumeric)
         .take(32)
         .map(char::from)
-        .collect();
-    format!("{prefix}{suffix}")
+        .collect()
 }
 
 fn issue_credentials(batch: &mut BatchBuilder, app_id: &str) -> AppCredentials {
     let credentials = AppCredentials {
-        api_key: generate_id("key_"),
-        token: generate_id("tok_"),
+        api_key: generate_id(),
+        token: generate_id(),
     };
     let index = api_key_index(&credentials.api_key);
     batch.assert_value(class(&index), AssertValue::None);
@@ -82,7 +129,7 @@ pub async fn lookup(
     }
     let prefix = result_prefix(&app_id, external_id);
     let results: Vec<DeliveryEvent> =
-        delivery_range(server.store(), &prefix, &format!("{prefix}~"), usize::MAX)
+        delivery_range::<DeliveryEvent>(server.store(), &prefix, &format!("{prefix}~"), usize::MAX)
             .await?
             .into_iter()
             .map(|(_, event)| event)
@@ -93,7 +140,7 @@ pub async fn lookup(
     Ok(JsonResponse::new(results).no_cache().into_http_response())
 }
 
-pub(super) fn is_admin(token: AccessToken) -> trc::Result<bool> {
+fn is_admin(token: AccessToken) -> trc::Result<bool> {
     let token = token.assert_allows_oauth_scopes(OAuthScopes::MAIL)?;
     let admin = token.has_permission(Permission::SysSystemSettingsUpdate);
     #[cfg(feature = "enterprise")]
@@ -119,18 +166,17 @@ pub async fn handle(
             let Some(input) = AppInput::parse(body) else {
                 return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
             };
-            let app = IntegratedApp {
-                app_id: generate_id("app_"),
-                name: input.name,
-                webhook_url: input.webhook_url,
+            let id = generate_id();
+            let Some(record) = input.into_record(&id, None) else {
+                return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
             };
-            let key = app_key(&app.app_id);
+            let key = app_key(&id);
             let mut batch = BatchBuilder::new();
             batch.assert_value(class(&key), AssertValue::None);
-            let credentials = issue_credentials(&mut batch, &app.app_id);
-            put(&mut batch, &key, &app);
+            let credentials = issue_credentials(&mut batch, &id);
+            put(&mut batch, &key, &record);
             server.store().write_batch(&mut batch).await?;
-            return Ok(JsonResponse::with_status(StatusCode::CREATED, app)
+            return Ok(JsonResponse::with_status(StatusCode::CREATED, record.app)
                 .no_cache()
                 .into_http_response()
                 .with_header("app-key", credentials.api_key)
@@ -140,12 +186,16 @@ pub async fn handle(
             return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED));
         }
         let prefix = apps_prefix();
-        let apps: Vec<IntegratedApp> =
-            delivery_range(server.store(), &prefix, &format!("{prefix}~"), usize::MAX)
-                .await?
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect();
+        let apps: Vec<IntegratedApp> = delivery_range::<IntegratedApp>(
+            server.store(),
+            &prefix,
+            &format!("{prefix}~"),
+            usize::MAX,
+        )
+        .await?
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect();
         return Ok(JsonResponse::new(apps).no_cache().into_http_response());
     }
     let ["apps", id, rest @ ..] = path else {
@@ -155,8 +205,10 @@ pub async fn handle(
         return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
     }
     let key = app_key(id);
-    let current: Option<IntegratedApp> = delivery_get(server.store(), &key).await?;
-    if rest == ["credentials"] && method == Method::GET && current.is_some() {
+    let Some(current) = delivery_get::<StoredApp>(server.store(), &key).await? else {
+        return Ok(missing());
+    };
+    if rest == ["credentials"] && method == Method::GET {
         let credentials =
             delivery_get::<AppCredentials>(server.store(), &credential_key(id)).await?;
         return Ok(match credentials {
@@ -164,7 +216,7 @@ pub async fn handle(
             None => missing(),
         });
     }
-    if rest == ["credentials", "regenerate"] && method == Method::POST && current.is_some() {
+    if rest == ["credentials", "regenerate"] && method == Method::POST {
         let Some(previous) =
             delivery_get::<AppCredentials>(server.store(), &credential_key(id)).await?
         else {
@@ -186,20 +238,14 @@ pub async fn handle(
         return Ok(missing());
     }
     let mut batch = BatchBuilder::new();
-    if current.is_some() {
-        batch.assert_value(class(&key), AssertValue::Some);
-    }
+    batch.assert_value(class(&key), AssertValue::Some);
     match *method {
         Method::GET => {
-            return Ok(match current {
-                Some(app) => JsonResponse::new(app).no_cache().into_http_response(),
-                None => missing(),
-            });
+            return Ok(JsonResponse::new(current.app)
+                .no_cache()
+                .into_http_response());
         }
         Method::DELETE if admin => {
-            if current.is_none() {
-                return Ok(missing());
-            }
             if let Some(credentials) =
                 delivery_get::<AppCredentials>(server.store(), &credential_key(id)).await?
             {
@@ -211,12 +257,10 @@ pub async fn handle(
             let Some(input) = AppInput::parse(body) else {
                 return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
             };
-            let Some(mut app) = current else {
-                return Ok(missing());
+            let Some(record) = input.into_record(id, Some(current)) else {
+                return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
             };
-            app.name = input.name;
-            app.webhook_url = input.webhook_url;
-            put(&mut batch, &key, &app);
+            put(&mut batch, &key, &record);
         }
         Method::POST => return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED)),
         _ => return Ok(forbidden()),
@@ -238,6 +282,86 @@ mod tests {
     };
     use std::sync::Arc;
     use store::{RegistryStore, registry::bootstrap::Bootstrap};
+
+    #[test]
+    fn webhook_auth_headers_and_write_only_secrets() {
+        let configured = |auth: serde_json::Value, secrets: serde_json::Value| {
+            let body = serde_json::json!({"name":"Billing","webhookUrl":"https://example.com/hook","webhookAuth":auth,"webhookSecrets":secrets});
+            AppInput::parse(Some(&serde_json::to_vec(&body).unwrap()))
+                .unwrap()
+                .into_record("id", None)
+        };
+        for (auth, secrets, key, val) in [
+            (
+                serde_json::json!({"type":"basic","username":"user"}),
+                serde_json::json!({"password":"pass"}),
+                "authorization",
+                "Basic dXNlcjpwYXNz",
+            ),
+            (
+                serde_json::json!({"type":"bearer"}),
+                serde_json::json!({"token":"hook-secret"}),
+                "authorization",
+                "Bearer hook-secret",
+            ),
+            (
+                serde_json::json!({"type":"apiKey","keyHeader":"X-Receiver"}),
+                serde_json::json!({"apiKey":"receiver-secret"}),
+                "x-receiver",
+                "receiver-secret",
+            ),
+        ] {
+            let record = configured(auth, secrets).unwrap();
+            assert_eq!(
+                record
+                    .app
+                    .webhook_auth
+                    .headers(&record.webhook_secrets)
+                    .unwrap()[key],
+                val
+            );
+            let view = serde_json::to_value(&record.app).unwrap();
+            assert!(view.get("webhookSecrets").is_none());
+            let unchanged = AppInput::parse(Some(
+                br#"{"name":"New","webhookUrl":"https://example.com/hook"}"#,
+            ))
+            .unwrap()
+            .into_record("id", Some(record))
+            .unwrap();
+            assert_eq!(
+                unchanged
+                    .app
+                    .webhook_auth
+                    .headers(&unchanged.webhook_secrets)
+                    .unwrap()[key],
+                val
+            );
+            assert!(
+                AppInput::parse(Some(
+                    br#"{"name":"New","webhookUrl":"https://another.example.com/hook"}"#
+                ))
+                .unwrap()
+                .into_record("id", Some(unchanged))
+                .is_none()
+            );
+        }
+        for name in ["", "Host", "Content-Length", "bad header", "X-Key\r\nOther"] {
+            assert!(
+                configured(
+                    serde_json::json!({"type":"apiKey","keyHeader":name}),
+                    serde_json::json!({"apiKey":"abc"})
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            configured(
+                serde_json::json!({"type":"apiKeyToken","keyHeader":"X-Key","tokenHeader":"x-key"}),
+                serde_json::json!({"apiKey":"k","token":"t"})
+            )
+            .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn tracked_delivery_survives_queue_removal_and_is_scoped_to_app() {
@@ -273,7 +397,8 @@ mod tests {
         };
         let registered: IntegratedApp = serde_json::from_str(body).unwrap();
         let id = registered.app_id.as_str();
-        assert!(id.starts_with("app_") && valid_id(id));
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| b.is_ascii_alphanumeric()));
         let app_path = ["apps", id];
         let headers = response.headers().unwrap();
         let api_key = headers["app-key"].to_str().unwrap();
@@ -405,6 +530,10 @@ mod tests {
         let fresh: AppCredentials = serde_json::from_str(json).unwrap();
         assert_ne!(fresh.api_key, api_key);
         assert_ne!(fresh.token, api_token);
+        for value in [api_key, api_token, &fresh.api_key, &fresh.token] {
+            assert_eq!(value.len(), 32);
+            assert!(value.bytes().all(|b| b.is_ascii_alphanumeric()));
+        }
         for (key, token) in [
             (api_key, api_token),
             (&fresh.api_key, api_token),

@@ -13,6 +13,119 @@ pub struct IntegratedApp {
     pub app_id: String,
     pub name: String,
     pub webhook_url: String,
+    #[serde(default)]
+    pub webhook_auth: WebhookAuth,
+}
+
+// Keep the webhook configuration and its secrets in one atomic store record.
+// Management responses serialize only the public app.
+#[derive(Serialize, Deserialize)]
+pub struct StoredApp {
+    #[serde(flatten)]
+    pub app: IntegratedApp,
+    #[serde(default)]
+    pub webhook_secrets: WebhookSecrets,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WebhookAuth {
+    #[default]
+    None,
+    Basic {
+        username: String,
+    },
+    Bearer,
+    ApiKey {
+        key_header: String,
+    },
+    ApiKeyToken {
+        key_header: String,
+        token_header: String,
+    },
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct WebhookSecrets {
+    pub password: String,
+    pub api_key: String,
+    pub token: String,
+}
+
+impl WebhookAuth {
+    pub fn headers(&self, secrets: &WebhookSecrets) -> Option<reqwest::header::HeaderMap> {
+        use reqwest::header::{HeaderName, HeaderValue};
+        fn custom(name: &str, value: &str) -> Option<(String, String)> {
+            let header = HeaderName::from_bytes(name.as_bytes()).ok()?;
+            if matches!(
+                header.as_str(),
+                "host"
+                    | "content-type"
+                    | "content-length"
+                    | "connection"
+                    | "transfer-encoding"
+                    | "trailer"
+                    | "upgrade"
+                    | "te"
+                    | "proxy-authorization"
+                    | "expect"
+            ) || value.trim().is_empty()
+                || value.trim() != value
+                || HeaderValue::from_str(value).is_err()
+            {
+                return None;
+            }
+            Some((name.to_owned(), value.to_owned()))
+        }
+        let mut extra = Vec::new();
+        let mut basic = None;
+        let mut bearer = None;
+        match self {
+            Self::None => {}
+            Self::Basic { username } => {
+                if username.trim().is_empty()
+                    || username.contains(':')
+                    || username.chars().any(char::is_control)
+                    || secrets.password.is_empty()
+                {
+                    return None;
+                }
+                basic = Some(username.as_str());
+            }
+            Self::Bearer => {
+                if secrets.token.is_empty()
+                    || secrets.token.bytes().any(|b| b.is_ascii_whitespace())
+                {
+                    return None;
+                }
+                bearer = Some(secrets.token.as_str());
+            }
+            Self::ApiKey { key_header } => extra.push(custom(key_header, &secrets.api_key)?),
+            Self::ApiKeyToken {
+                key_header,
+                token_header,
+            } => {
+                if key_header.eq_ignore_ascii_case(token_header) {
+                    return None;
+                }
+                extra.push(custom(key_header, &secrets.api_key)?);
+                extra.push(custom(token_header, &secrets.token)?);
+            }
+        }
+        let mut headers =
+            utils::http::build_http_headers(extra, basic, Some(&secrets.password), bearer, None)
+                .ok()?;
+        for value in headers.values_mut() {
+            value.set_sensitive(true);
+        }
+        Some(headers)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

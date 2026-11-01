@@ -6,7 +6,13 @@ info:
     that complement the JMAP API — most of the server's configuration and data
     is managed via JMAP (see `POST /jmap/`). The endpoints documented here cover
     interactive login, account introspection, configuration schema retrieval and
-    live (Server-Sent Events) telemetry streams.
+    live (Server-Sent Events) telemetry streams, integrated applications, and per-recipient delivery status.
+
+    For a local installation choose the localhost server below. Management requests use an
+    account credential (HTTP Basic) or an OAuth access token (Bearer). Integrated application
+    management requires a system administrator. Delivery status lookup instead requires both
+    App-Key and App-Token headers. Webhook authentication is outbound and configured separately.
+    POST and PUT requests with JSON require Content-Type: application/json.
   version: "1.0"
   license:
     name: AGPL-3.0-only OR LicenseRef-SEL
@@ -17,15 +23,12 @@ servers:
       host:
         default: mail.example.com
         description: The hostname of Stalwart server
+  - url: http://localhost:8080
+    description: Local development server
 security:
   - bearerAuth: []
   - basicAuth: []
 paths:
-  /api/integrations/manage:
-    get:
-      summary: Open the integrated applications administration page as a system administrator
-      responses:
-        '200': {description: HTML page that uses authenticated app management endpoints}
   /api/integrations/apps:
     get:
       summary: List integrated applications as a system administrator
@@ -60,7 +63,7 @@ paths:
               schema: {$ref: '#/components/schemas/IntegratedApp'}
         '404': {description: Unknown or inaccessible application}
     put:
-      summary: Update the application name or callback URL
+      summary: Update the application name, callback URL or webhook authentication
       requestBody: {$ref: '#/components/requestBodies/IntegratedAppInput'}
       responses:
         '204': {description: Updated}
@@ -106,7 +109,7 @@ paths:
                   appKey: {type: string}
                   appToken: {type: string}
         '409': {description: The integration changed during rotation}
-  /api/integrations/deliveries/{externalId}:
+  /api/integrations/deliveries/{externalId}/status:
     parameters:
       - {in: path, name: externalId, required: true, schema: {type: string, maxLength: 128}}
     get:
@@ -120,8 +123,9 @@ paths:
         The server removes all three tracking headers before outbound delivery. Reusing an External-ID
         within one app returns the recipients of every matching queue ID. Results persist
         after SMTP queue removal. Each status transition is also POSTed as one DeliveryEvent
-        to the exact registered URL with App-Key and App-Token headers.
-        Lookup uses the same headers. Callback retries reuse eventId and can arrive out of order.
+        as JSON to the registered URL using its configured webhook authentication.
+        Generated app credentials are used only for submission and status lookup.
+        Lookup requires App-Key and App-Token request headers. Callback retries reuse eventId and can arrive out of order.
       responses:
         '200':
           description: Latest persisted status per queue ID and recipient
@@ -489,6 +493,16 @@ components:
             properties:
               name: {type: string, minLength: 1, maxLength: 128}
               webhookUrl: {type: string, format: uri, description: Public HTTPS callback URL}
+              webhookAuth: {$ref: '#/components/schemas/WebhookAuth'}
+              webhookSecrets:
+                type: object
+                writeOnly: true
+                additionalProperties: false
+                description: Supply password for Basic, token for Bearer, apiKey for API key, and both apiKey and token for API key plus token. On edits, omitted secrets are retained only for the same URL and authentication type.
+                properties:
+                  password: {type: string, format: password}
+                  apiKey: {type: string, format: password}
+                  token: {type: string, format: password}
   securitySchemes:
     integrationApiKey:
       type: apiKey
@@ -555,9 +569,19 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
 
   schemas:
+    WebhookAuth:
+      type: object
+      required: [type]
+      description: Defaults to none on creation. Basic requires username. API key modes require keyHeader, and apiKeyToken also requires a distinct tokenHeader.
+      properties:
+        type: {type: string, enum: [none, basic, bearer, apiKey, apiKeyToken]}
+        username: {type: string}
+        keyHeader: {type: string}
+        tokenHeader: {type: string}
     IntegratedApp:
       type: object
       properties:
+        webhookAuth: {$ref: '#/components/schemas/WebhookAuth'}
         appId: {type: string}
         name: {type: string}
         webhookUrl: {type: string, format: uri}

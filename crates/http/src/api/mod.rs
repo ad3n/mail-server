@@ -69,24 +69,11 @@ impl ManagementApi for Server {
                 .path()
                 .trim_start_matches("/api/integrations/")
                 .to_owned();
-            if req.method() == Method::GET && route == "manage" {
-                if !req.headers().contains_key(header::AUTHORIZATION) {
-                    return Ok(HttpResponse::new(StatusCode::UNAUTHORIZED)
-                        .with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE)
-                        .with_no_store());
-                }
-                let auth = self.authenticate_headers(req, session).await?;
-                if !integrations::is_admin(auth.access_token)? {
-                    return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
-                }
-                return Ok(HttpResponse::new(StatusCode::OK)
-                    .with_content_type("text/html; charset=utf-8")
-                    .with_cache_control("no-store")
-                    .with_text_body(include_str!(
-                        "../../../../resources/html-templates/integrations.html"
-                    )));
-            }
-            if let Some(external_id) = route.strip_prefix("deliveries/") {
+            let path = route.split('/').collect::<Vec<_>>();
+            if path.first() == Some(&"deliveries") {
+                let ["deliveries", external_id, "status"] = path.as_slice() else {
+                    return Ok(HttpResponse::new(StatusCode::NOT_FOUND));
+                };
                 if req.method() != Method::GET {
                     return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED));
                 }
@@ -122,7 +109,7 @@ impl ManagementApi for Server {
             return integrations::handle(
                 self,
                 auth.access_token,
-                &route.split('/').collect::<Vec<_>>(),
+                &path,
                 req.method(),
                 body.as_deref(),
             )

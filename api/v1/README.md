@@ -1,0 +1,56 @@
+# Mengakses API Stalwart
+
+Impor `openapi.yml` ke Postman atau Swagger UI. Pilih server `http://localhost:8080` untuk instance lokal ini. Untuk deployment lain, gunakan origin HTTPS Stalwart. Di Swagger UI, gunakan **Authorize** sesuai operasi. Pada perintah berikut, `curl -u admin` akan meminta password admin Stalwart.
+
+| Client | Endpoint | Autentikasi |
+|---|---|---|
+| Browser atau client OAuth | `GET /api/discover/{email}`, `POST /api/auth` | Discovery dan awal login dapat diakses tanpa token. Ikuti alur OAuth dan PKCE yang dijelaskan pada operasi login untuk mendapatkan access token. |
+| Pengguna Stalwart | `GET /api/account`, `GET /api/schema`, `GET /api/schema/{hash}` | HTTP Basic atau `Authorization: Bearer <access_token>`. Gunakan `curl -L` untuk mengikuti redirect schema. |
+| Admin sistem | `/api/integrations/apps` dan subpath-nya | Basic atau OAuth dengan izin admin sistem. Jika bearer token dibatasi scope, akses ini membutuhkan scope mail. |
+| Aplikasi pengirim | `GET /api/integrations/deliveries/{externalId}/status` | Kirim **kedua** header `App-Key` dan `App-Token` milik aplikasi. Hasilnya hanya mencakup pengiriman aplikasi tersebut. |
+| Client diagnostik | `GET /api/token/{jenis}` dan `GET /api/live/…` | Basic atau Bearer dengan izin terkait. Untuk EventSource, ambil token berumur pendek dari endpoint token yang sesuai dan kirim sebagai `?token=…` ke stream. Tracing dan metrics memerlukan Enterprise. |
+
+## Administrasi aplikasi
+
+```bash
+BASE=http://localhost:8080
+curl -u admin "$BASE/api/integrations/apps"
+
+curl -i -u admin -H 'Content-Type: application/json' \
+  -d '{"name":"Billing","webhookUrl":"https://billing.example.com/events","webhookAuth":{"type":"none"}}' \
+  "$BASE/api/integrations/apps"
+```
+
+Pembuatan sukses menghasilkan HTTP 201. Body berisi `appId`. Header respons memuat `App-Key` dan `App-Token` yang dihasilkan Stalwart. Untuk operasi berikut, ganti `APP_ID` dengan ID di body tersebut.
+
+| Operasi | Method dan path |
+|---|---|
+| Lihat atau edit aplikasi | `GET` atau `PUT /api/integrations/apps/APP_ID`. Untuk PUT, sertakan name dan webhookUrl. |
+| Ambil kredensial aplikasi | `GET /api/integrations/apps/APP_ID/credentials` |
+| Regenerasi kedua kredensial | `POST /api/integrations/apps/APP_ID/credentials/regenerate` dengan JSON `{}`. Pasangan lama langsung dicabut. |
+| Hapus aplikasi | `DELETE /api/integrations/apps/APP_ID` |
+
+## Pengiriman dan lookup
+
+Saat submission SMTP terautentikasi, tambahkan header pesan `External-ID`, `App-Key`, dan `App-Token`. Stalwart melepas ketiganya sebelum pengiriman ke penerima. Untuk membaca status, isi variabel dari kredensial aplikasi dan gunakan External-ID yang sama persis, termasuk nol di depan.
+
+```bash
+curl -i -H "App-Key: $APP_KEY" -H "App-Token: $APP_TOKEN" \
+  "$BASE/api/integrations/deliveries/00042/status"
+```
+
+HTTP 200 menghasilkan array status per penerima. HTTP 401 menunjukkan kredensial tidak cocok. HTTP 404 berarti tidak ada hasil yang dapat diakses untuk External-ID itu.
+
+## Autentikasi webhook keluar
+
+Stalwart mengirim satu POST JSON per perubahan status ke `webhookUrl`. Konfigurasi di bawah diisi admin sesuai kontrak **server penerima webhook**, terpisah dari kredensial lookup yang dihasilkan Stalwart.
+
+| Auth Type | webhookAuth | webhookSecrets |
+|---|---|---|
+| None (default) | `{"type":"none"}` | Tidak diperlukan |
+| Basic | `{"type":"basic","username":"billing"}` | `{"password":"…"}` |
+| Bearer | `{"type":"bearer"}` | `{"token":"…"}` |
+| API Key | `{"type":"apiKey","keyHeader":"X-Api-Key"}` | `{"apiKey":"…"}` |
+| API Key + Token | `{"type":"apiKeyToken","keyHeader":"X-Api-Key","tokenHeader":"X-Webhook-Token"}` | `{"apiKey":"…","token":"…"}` |
+
+Untuk Basic dan Bearer, Stalwart menyusun header Authorization. Untuk API Key dan API Key + Token, isi nama header dan nilai yang diharapkan receiver. Nilai rahasia hanya dapat ditulis. Pada PUT dengan URL dan jenis autentikasi yang sama, nilai rahasia yang dikosongkan mempertahankan nilai tersimpan. Jika URL atau jenis autentikasi berubah, isi kembali semua rahasia yang dibutuhkan.
