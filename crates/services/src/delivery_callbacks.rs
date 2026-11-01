@@ -11,7 +11,7 @@ use utils::{
 pub fn spawn(inner: Arc<Inner>) {
     tokio::spawn(async move {
         let client = OutboundClient::new(
-            http_client_builder(false),
+            http_client_builder(false).pool_max_idle_per_host(0),
             OutboundPolicy::PublicOnly,
             Redirects::None,
         );
@@ -32,11 +32,21 @@ pub fn spawn(inner: Arc<Inner>) {
                         });
                     }
                     while let Some(result) = workers.join_next().await {
-                        if let Ok(Err(err)) = result {
-                            trc::error!(err);
+                        match result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(err)) => {
+                                trc::error!(err);
+                            }
+                            Err(err) => {
+                                trc::error!(
+                                    trc::EventType::Server(trc::ServerEvent::ThreadError)
+                                        .reason(err)
+                                );
+                            }
                         }
                     }
                     if full_batch {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
                     }
                 }
@@ -57,18 +67,21 @@ async fn deliver(
     callback: DeliveryEvent,
 ) -> trc::Result<()> {
     // Moving the job grants this worker a lease. Another node can retry after a crash.
-    let lease = callback_key(now() + 60, &callback.event_id);
+    let payload = encode(&callback)?;
+    let lease = callback_key(now().saturating_add(60), &callback.event_id);
     let mut claim = BatchBuilder::new();
     claim
         .assert_value(class(&key), AssertValue::Some)
         .clear(class(&key));
-    put(&mut claim, &lease, &callback);
+    claim.set(class(&lease), payload.clone());
     match store.write_batch(&mut claim).await {
         Err(e) if e.is_assertion_failure() => return Ok(()),
         result => {
             result?;
         }
     }
+
+    drop(claim);
 
     if let Some(app) = delivery_get::<StoredApp>(store, &app_key(&callback.app_id)).await? {
         let headers = app
@@ -85,7 +98,7 @@ async fn deliver(
                 .headers(headers)
                 .timeout(Duration::from_secs(10))
                 .header("Content-Type", "application/json")
-                .body(serde_json::to_vec(&callback).expect("serializable delivery event"))
+                .body(payload)
                 .send()
                 .await
                 .is_ok_and(|r| r.status().is_success()),
@@ -96,7 +109,7 @@ async fn deliver(
                 Telemetry(trc::TelemetryEvent::WebhookError),
                 Details = "App delivery callback failed; retry scheduled",
                 Id = callback.event_id,
-                NextRetry = trc::Value::Timestamp(now() + 60)
+                NextRetry = trc::Value::Timestamp(now().saturating_add(60))
             );
             return Ok(());
         }
@@ -122,7 +135,7 @@ mod tests {
         let url = format!("http://{}/status", listener.local_addr().unwrap());
         let receiver = tokio::spawn(async move {
             let mut bodies = Vec::new();
-            for status in ["503 Service Unavailable", "204 No Content"] {
+            for status in ["503 Service Unavailable", "200 OK"] {
                 let (socket, _) = listener.accept().await.unwrap();
                 let mut socket = BufReader::new(socket);
                 let mut length = 0;
@@ -133,6 +146,8 @@ mod tests {
                     if line == "\r\n" {
                         break;
                     }
+                    assert!(!line.contains("test-key"));
+                    assert!(!line.contains("test-token"));
                     if let Some((name, value)) = line.split_once(':') {
                         match name.to_ascii_lowercase().as_str() {
                             "x-tenant-key" => custom_headers.0 = Some(value.trim().to_owned()),
@@ -146,7 +161,7 @@ mod tests {
                         length = n.trim().parse().unwrap();
                     }
                 }
-                if status.starts_with("204") {
+                if status.starts_with("200") {
                     assert_eq!(
                         custom_headers,
                         (Some("receiver-key".into()), Some("receiver-token".into()))
@@ -161,7 +176,7 @@ mod tests {
                     .get_mut()
                     .write_all(
                         format!(
-                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            "HTTP/1.1 {status}\r\nContent-Length: 1073741824\r\nConnection: close\r\n\r\n"
                         )
                         .as_bytes(),
                     )
@@ -189,7 +204,7 @@ mod tests {
             hostname: None,
         };
         let mut batch = BatchBuilder::new();
-        put(&mut batch, &app_key("sales"), &app);
+        put(&mut batch, &app_key("sales"), &app).unwrap();
         put(
             &mut batch,
             &credential_key("sales"),
@@ -197,16 +212,22 @@ mod tests {
                 api_key: "test-key".into(),
                 token: "test-token".into(),
             },
-        );
+        )
+        .unwrap();
         let key = callback_key(0, "unique");
-        put(&mut batch, &key, &callback);
+        put(&mut batch, &key, &callback).unwrap();
         store.write_batch(&mut batch).await.unwrap();
         let client = OutboundClient::new(
             http_client_builder(false).no_proxy(),
             OutboundPolicy::Trusted,
             Redirects::None,
         );
-        deliver(&store, &client, key, callback).await.unwrap();
+        let (first, second) = tokio::join!(
+            deliver(&store, &client, key.clone(), callback.clone()),
+            deliver(&store, &client, key, callback),
+        );
+        first.unwrap();
+        second.unwrap();
         let mut pending =
             delivery_range::<DeliveryEvent>(&store, "delivery/outbox/", "delivery/outbox/~", 10)
                 .await
@@ -228,10 +249,13 @@ mod tests {
             },
         };
         let mut batch = BatchBuilder::new();
-        put(&mut batch, &app_key("sales"), &configured);
+        put(&mut batch, &app_key("sales"), &configured).unwrap();
         store.write_batch(&mut batch).await.unwrap();
         deliver(&store, &client, key, job).await.unwrap();
-        let bodies = receiver.await.unwrap();
+        let bodies = tokio::time::timeout(Duration::from_secs(5), receiver)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(bodies[0], bodies[1]);
         let payload: serde_json::Value = serde_json::from_slice(&bodies[0]).unwrap();
         assert_eq!(payload["externalId"], "00042");

@@ -32,6 +32,7 @@ paths:
   /api/integrations/apps:
     get:
       summary: List integrated applications as a system administrator
+      description: Reads at most 10000 records and 16 MiB of stored data. Exceeding either bound fails the request without returning partial results.
       responses:
         '200':
           description: Registered applications
@@ -120,12 +121,17 @@ paths:
       description: |
         Submit App-Key, App-Token and External-ID message headers using authenticated SMTP.
         IDs are case sensitive and support ASCII letters, digits, dots, underscores and hyphens.
+        Application credentials are verified before extracting External-ID. Missing, invalid, or unknown
+        credentials disable tracking without rejecting the email or validating External-ID.
+        Valid credentials require exactly one valid External-ID. Registry failures return a temporary SMTP error.
         The server removes all three tracking headers before outbound delivery. Reusing an External-ID
         within one app returns the recipients of every matching queue ID. Results persist
         after SMTP queue removal. Each status transition is also POSTed as one DeliveryEvent
         as JSON to the registered URL using its configured webhook authentication.
         Generated app credentials are used only for submission and status lookup.
         Lookup requires App-Key and App-Token request headers. Callback retries reuse eventId and can arrive out of order.
+        Reads are limited to 10000 records and 16 MiB of stored data. Exceeding either bound fails
+        the request without returning partial results. Each stored tracking record is limited to 256 KiB of JSON.
       responses:
         '200':
           description: Latest persisted status per queue ID and recipient

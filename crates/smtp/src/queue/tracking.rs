@@ -3,7 +3,7 @@
 use super::{Message, MessageWrapper, Metadata, Status};
 use common::Server;
 use common::config::smtp::queue::QueueName;
-use common::delivery_tracking::{DeliveryEvent, callback_key, put, result_prefix};
+use common::delivery_tracking::{DeliveryEvent, callback_key, class, encode, result_prefix};
 use store::write::{BatchBuilder, now};
 
 #[derive(
@@ -56,9 +56,9 @@ impl MessageWrapper {
         batch: &mut BatchBuilder,
         removing: bool,
         queue: Option<QueueName>,
-    ) {
+    ) -> trc::Result<()> {
         let Some(t) = self.message.tracking() else {
-            return;
+            return Ok(());
         };
         let timestamp = now();
         for (i, rcpt) in self.message.recipients.iter().enumerate() {
@@ -109,8 +109,10 @@ impl MessageWrapper {
                 result_prefix(&t.app_id, &t.external_id),
                 self.queue_id
             );
-            put(batch, &result, &event);
-            put(batch, &callback_key(timestamp, &event.event_id), &event);
+            let encoded = encode(&event)?;
+            batch.set(class(&result), encoded.clone());
+            batch.set(class(&callback_key(timestamp, &event.event_id)), encoded);
         }
+        Ok(())
     }
 }

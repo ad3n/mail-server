@@ -74,80 +74,98 @@ impl MessageOrigin {
     }
 }
 
-fn take_tracking_headers(
-    raw: &mut Vec<u8>,
-) -> Result<Option<(String, String, String)>, &'static [u8]> {
-    use common::delivery_tracking::valid_id;
-    let Some(message) = MessageParser::new().parse_headers(raw) else {
-        return Ok(None);
+async fn extract_tracking(
+    store: &store::Store,
+    authenticated: bool,
+    mut raw: Vec<u8>,
+) -> Result<(Vec<u8>, Option<queue::tracking::Tracking>), &'static [u8]> {
+    use common::delivery_tracking::{authenticate_app, valid_id};
+    let Some(message) = MessageParser::new().parse_headers(&raw) else {
+        return Ok((raw, None));
     };
-    let headers = message.headers();
-    if !headers.iter().any(|h| {
-        let name = h.name();
-        name.as_str().eq_ignore_ascii_case("App-Key")
-            || name.as_str().eq_ignore_ascii_case("App-Token")
-    }) {
-        return Ok(None);
-    }
     let mut app_key = None;
     let mut app_token = None;
-    let mut external_id = None;
+    let mut external_range = None;
+    let mut invalid_credentials = false;
+    let mut duplicate_external = false;
     let mut ranges = Vec::new();
-    for h in headers.iter() {
+    for h in message.headers() {
         let name = h.name();
+        let value_range = h.offset_start() as usize..h.offset_end() as usize;
         let slot = if name.as_str().eq_ignore_ascii_case("App-Key") {
             &mut app_key
         } else if name.as_str().eq_ignore_ascii_case("App-Token") {
             &mut app_token
         } else if name.as_str().eq_ignore_ascii_case("External-ID") {
-            &mut external_id
+            duplicate_external |= external_range.replace(value_range).is_some();
+            ranges.push(h.offset_field() as usize..h.offset_end() as usize);
+            continue;
         } else {
             continue;
         };
-        let value = std::str::from_utf8(&raw[h.offset_start() as usize..h.offset_end() as usize])
+        ranges.push(h.offset_field() as usize..h.offset_end() as usize);
+        let value = raw
+            .get(value_range)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .unwrap_or("")
             .trim();
         if slot.is_some() || !valid_id(value) {
-            return Err(b"550 5.6.0 Invalid tracking header.\r\n");
+            invalid_credentials = true;
+        } else {
+            *slot = Some(value.to_owned());
         }
-        *slot = Some(value.to_owned());
-        ranges.push(h.offset_field() as usize..h.offset_end() as usize);
     }
-    let (Some(app_key), Some(app_token), Some(external_id)) = (app_key, app_token, external_id)
-    else {
-        return Err(b"550 5.6.0 App-Key, App-Token and External-ID must appear together.\r\n");
+    drop(message);
+    if ranges.is_empty() {
+        return Ok((raw, None));
+    }
+
+    let app_id = match (app_key, app_token) {
+        (Some(key), Some(token)) if authenticated && !invalid_credentials => {
+            authenticate_app(store, &key, &token)
+                .await
+                .map_err(|_| &b"451 4.3.0 App registry unavailable.\r\n"[..])?
+        }
+        _ => None,
     };
-    for range in ranges.into_iter().rev() {
-        raw.drain(range);
+    let tracking = if let Some(app_id) = app_id {
+        let external_id = external_range
+            .and_then(|range| raw.get(range))
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .map(str::trim)
+            .filter(|value| valid_id(value));
+        let Some(external_id) = external_id.filter(|_| !duplicate_external) else {
+            return Err(b"550 5.6.0 Invalid or missing External-ID.\r\n");
+        };
+        Some(queue::tracking::Tracking {
+            app_id,
+            external_id: external_id.to_owned(),
+        })
+    } else {
+        None
+    };
+
+    // Validate every offset before modifying the message, then compact it in one pass.
+    let mut end = 0;
+    for range in &ranges {
+        if range.start < end || range.start > range.end || range.end > raw.len() {
+            return Err(b"550 5.6.0 Invalid tracking header offsets.\r\n");
+        }
+        end = range.end;
     }
-    Ok(Some((app_key, app_token, external_id)))
+    let mut read = 0;
+    let mut write = 0;
+    for range in ranges {
+        raw.copy_within(read..range.start, write);
+        write += range.start - read;
+        read = range.end;
+    }
+    raw.copy_within(read.., write);
+    raw.truncate(write + raw.len() - read);
+    Ok((raw, tracking))
 }
 
 impl<T: SessionStream> Session<T> {
-    async fn extract_tracking(
-        &self,
-        mut raw: Vec<u8>,
-    ) -> Result<(Vec<u8>, Option<queue::tracking::Tracking>), &'static [u8]> {
-        use common::delivery_tracking::authenticate_app;
-        let Some((key, token, external_id)) = take_tracking_headers(&mut raw)? else {
-            return Ok((raw, None));
-        };
-        if !self.is_authenticated() {
-            return Err(b"550 5.7.1 Tracking requires authenticated submission.\r\n");
-        }
-        let app_id = authenticate_app(self.server.store(), &key, &token)
-            .await
-            .map_err(|_| &b"451 4.3.0 App registry unavailable.\r\n"[..])?
-            .ok_or(&b"550 5.7.1 Invalid app credentials.\r\n"[..])?;
-        Ok((
-            raw,
-            Some(queue::tracking::Tracking {
-                app_id,
-                external_id,
-            }),
-        ))
-    }
-
     pub async fn queue_message(&mut self, origin: MessageOrigin) -> Cow<'static, [u8]> {
         // Parse message
         let raw_message = std::mem::take(&mut self.data.message);
@@ -168,10 +186,12 @@ impl<T: SessionStream> Session<T> {
             }
             None => None,
         };
-        let (raw_message, tracking) = match self.extract_tracking(raw_message).await {
-            Ok(result) => result,
-            Err(reply) => return reply.into(),
-        };
+        let (raw_message, tracking) =
+            match extract_tracking(self.server.store(), self.is_authenticated(), raw_message).await
+            {
+                Ok(result) => result,
+                Err(reply) => return reply.into(),
+            };
         let parsed_message = match MessageParser::new()
             .parse(&raw_message)
             .filter(|p| p.headers().has_known())
@@ -1340,27 +1360,90 @@ fn parse_dkim2_dsn<'x, 'r>(
 
 #[cfg(test)]
 mod tracking_tests {
-    use super::take_tracking_headers;
+    use super::extract_tracking;
+    use common::delivery_tracking::{AppCredentials, api_key_index, credential_key, put};
+    use store::{backend::ephemeral::EphemeralStore, write::BatchBuilder};
 
-    #[test]
-    fn private_headers_are_removed_only_from_the_envelope_message_headers() {
-        let mut raw = b"Subject: Hi\r\naPp-Key: sales\r\nApp-Token: secret\r\nMessage-ID: <one@example.com>\r\nExternal-ID: 00042\r\n\r\nApp-ID: body\r\n".to_vec();
-        assert_eq!(
-            take_tracking_headers(&mut raw).unwrap(),
-            Some(("sales".into(), "secret".into(), "00042".into()))
+    async fn registered_store() -> store::Store {
+        let store = EphemeralStore::open();
+        let mut batch = BatchBuilder::new();
+        put(&mut batch, &api_key_index("key"), &"app").unwrap();
+        put(
+            &mut batch,
+            &credential_key("app"),
+            &AppCredentials {
+                api_key: "key".into(),
+                token: "token".into(),
+            },
+        )
+        .unwrap();
+        store.write_batch(&mut batch).await.unwrap();
+        store
+    }
+
+    #[tokio::test]
+    async fn invalid_or_missing_credentials_skip_external_id_validation() {
+        let store = registered_store().await;
+        for credentials in [
+            "",
+            "App-Key: key\r\n",
+            "App-Token: token\r\n",
+            "App-Key: unknown\r\nApp-Token: token\r\n",
+            "App-Key: key\r\nApp-Token: wrong\r\n",
+            "App-Key: ../bad\r\nApp-Token: token\r\n",
+            "App-Key: key\r\nApp-Key: key\r\nApp-Token: token\r\n",
+        ] {
+            let raw = format!("Subject: Hi\r\n{credentials}External-ID: ../invalid\r\nExternal-ID: duplicate\r\n\r\nbody").into_bytes();
+            let (cleaned, tracking) = extract_tracking(&store, true, raw).await.unwrap();
+            assert!(tracking.is_none());
+            assert_eq!(cleaned, b"Subject: Hi\r\n\r\nbody");
+        }
+        let raw =
+            b"App-Key: key\r\nApp-Token: token\r\nExternal-ID: ../invalid\r\n\r\nbody".to_vec();
+        assert!(
+            extract_tracking(&store, false, raw)
+                .await
+                .unwrap()
+                .1
+                .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn valid_credentials_require_external_id_and_strip_private_headers() {
+        let store = registered_store().await;
+        let raw = b"Subject: Hi\r\naPp-Key: key\r\nApp-Token: token\r\nMessage-ID: <one@example.com>\r\nExternal-ID: 00042\r\n\r\nApp-Key: body\r\n".to_vec();
+        let (raw, tracking) = extract_tracking(&store, true, raw).await.unwrap();
+        let tracking = tracking.unwrap();
+        assert_eq!(tracking.app_id, "app");
+        assert_eq!(tracking.external_id, "00042");
         assert_eq!(
             raw,
-            b"Subject: Hi\r\nMessage-ID: <one@example.com>\r\n\r\nApp-ID: body\r\n"
+            b"Subject: Hi\r\nMessage-ID: <one@example.com>\r\n\r\nApp-Key: body\r\n"
         );
-        assert!(take_tracking_headers(&mut raw).unwrap().is_none());
-        for invalid in [
-            "App-Key: sales\r\n",
-            "App-Key: sales\r\nExternal-ID: a\r\nExternal-ID: b\r\n",
-            "App-Key: ../x\r\nExternal-ID: 3\r\n",
+        for external in [
+            "",
+            "External-ID: ../bad\r\n",
+            "External-ID: a\r\nExternal-ID: b\r\n",
         ] {
-            let mut raw = format!("From: a@example.com\r\n{invalid}\r\n").into_bytes();
-            assert!(take_tracking_headers(&mut raw).is_err());
+            let raw =
+                format!("App-Key: key\r\nApp-Token: token\r\n{external}\r\nbody").into_bytes();
+            assert!(extract_tracking(&store, true, raw).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn truncated_and_binary_tracking_headers_do_not_panic() {
+        let store = registered_store().await;
+        let message = b"App-Key: key\r\nApp-Token: token\r\nExternal-ID: external\r\n\r\nbody";
+        for end in 0..=message.len() {
+            let _ = extract_tracking(&store, true, message[..end].to_vec()).await;
+        }
+        for byte in 0..=255 {
+            let mut raw = b"App-Key: key\r\nApp-Token: token\r\nExternal-ID: ".to_vec();
+            raw.push(byte);
+            raw.extend_from_slice(b"\r\n\r\nbody");
+            let _ = extract_tracking(&store, true, raw).await;
         }
     }
 }

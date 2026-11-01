@@ -393,12 +393,24 @@ fn signature_header_capacity(signature: &Signature) -> usize {
 const HEADER_BASE_CAPACITY: usize = 256;
 
 fn strip_dkim2_headers(message: &[u8]) -> Option<Vec<u8>> {
+    strip_headers(message, is_dkim2_field)
+}
+
+pub(crate) fn strip_app_credentials(message: &[u8]) -> Option<Vec<u8>> {
+    strip_headers(message, |line| {
+        line.split(|&ch| ch == b':').next().is_some_and(|name| {
+            hashify::set_ignore_case!(name.trim_ascii(), "app-key", "app-token")
+        })
+    })
+}
+
+fn strip_headers(message: &[u8], matches: impl Fn(&[u8]) -> bool) -> Option<Vec<u8>> {
     let mut stripped: Option<Vec<u8>> = None;
     let mut offset = 0;
     let mut skipping = false;
     for line in header_lines(message) {
         if !is_continuation(line) {
-            skipping = is_dkim2_field(line);
+            skipping = matches(line);
         }
         match &mut stripped {
             Some(stripped) if !skipping => stripped.extend_from_slice(line),
@@ -505,3 +517,24 @@ fn sanitize_or_lower(rcpt: &str) -> String {
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/smtp/src/inbound/dkim/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod app_credential_tests {
+    use super::strip_app_credentials;
+
+    #[test]
+    fn strips_only_app_credentials_including_duplicates_and_folded_values() {
+        let raw = b"Subject: Test\r\naPp-Key: secret-key\r\n continuation\r\nApp-Token: secret-token\r\n\tcontinued\r\nAPP-KEY : duplicate\r\nApi-Key: unrelated\r\nApi-Token: unrelated-token\r\nExternal-ID: 00042\r\n\r\nApp-Key: body text\r\n";
+        let expected = b"Subject: Test\r\nApi-Key: unrelated\r\nApi-Token: unrelated-token\r\nExternal-ID: 00042\r\n\r\nApp-Key: body text\r\n";
+        assert_eq!(strip_app_credentials(raw).unwrap(), expected);
+        assert!(strip_app_credentials(expected).is_none());
+        assert_eq!(
+            strip_app_credentials(b"App-Key: key\nApp-Token: token\nSubject: X\n\nbody").unwrap(),
+            b"Subject: X\n\nbody"
+        );
+        assert_eq!(
+            strip_app_credentials(b"App-Key: key\r\nApp-Token: token").unwrap(),
+            b""
+        );
+    }
+}

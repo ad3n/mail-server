@@ -1,11 +1,49 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::io::{self, Write};
 use store::Store;
 use store::{
     IterateParams, Subspace,
     write::{AnyClass, AnyKey, BatchBuilder, ValueClass, serialize::RawValue},
 };
+
+const MAX_RECORD_BYTES: usize = 256 * 1024;
+const MAX_RANGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_RANGE_RECORDS: usize = 10_000;
+
+fn size_limit() -> trc::Error {
+    trc::StoreEvent::UnexpectedError
+        .into_err()
+        .details("Delivery tracking size limit exceeded")
+}
+
+struct RecordBuffer(Vec<u8>);
+
+impl Write for RecordBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > MAX_RECORD_BYTES.saturating_sub(self.0.len()) {
+            return Err(io::Error::other("Delivery record size limit exceeded"));
+        }
+        self.0.try_reserve(bytes.len()).map_err(io::Error::other)?;
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+pub fn encode<T: Serialize>(value: &T) -> trc::Result<Vec<u8>> {
+    let mut buffer = RecordBuffer(Vec::new());
+    serde_json::to_writer(&mut buffer, value).map_err(|_| {
+        trc::StoreEvent::UnexpectedError
+            .into_err()
+            .details("Failed to serialize delivery record")
+    })?;
+    Ok(buffer.0)
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -217,17 +255,18 @@ pub fn class(value: &str) -> ValueClass {
     })
 }
 fn decode<T: DeserializeOwned>(bytes: &[u8]) -> trc::Result<T> {
+    if bytes.len() > MAX_RECORD_BYTES {
+        return Err(size_limit());
+    }
     serde_json::from_slice(bytes).map_err(|e| {
         trc::StoreEvent::DataCorruption
             .into_err()
             .details(e.to_string())
     })
 }
-pub fn put<T: Serialize>(batch: &mut BatchBuilder, k: &str, value: &T) {
-    batch.set(
-        class(k),
-        serde_json::to_vec(value).expect("serializable delivery record"),
-    );
+pub fn put<T: Serialize>(batch: &mut BatchBuilder, k: &str, value: &T) -> trc::Result<()> {
+    batch.set(class(k), encode(value)?);
+    Ok(())
 }
 
 pub async fn delivery_get<T: DeserializeOwned>(store: &Store, k: &str) -> trc::Result<Option<T>> {
@@ -244,13 +283,109 @@ pub async fn delivery_range<T: DeserializeOwned + Send + Sync>(
     limit: usize,
 ) -> trc::Result<Vec<(String, T)>> {
     let mut items = Vec::new();
+    if limit == 0 {
+        return Ok(items);
+    }
+    let mut bytes_left = MAX_RANGE_BYTES;
     store
-        .iterate(IterateParams::new(key(start), key(end)), |k, v| {
-            let k =
-                std::str::from_utf8(k).map_err(|_| trc::StoreEvent::DataCorruption.into_err())?;
-            items.push((k.to_owned(), decode(v)?));
-            Ok(items.len() < limit)
-        })
+        .iterate(
+            IterateParams::new(key(start), key(end)).limit(limit.min(MAX_RANGE_RECORDS + 1)),
+            |k, v| {
+                let bytes = k.len().checked_add(v.len()).ok_or_else(size_limit)?;
+                bytes_left = bytes_left.checked_sub(bytes).ok_or_else(size_limit)?;
+                if items.len() >= MAX_RANGE_RECORDS {
+                    return Err(size_limit());
+                }
+                let k = std::str::from_utf8(k)
+                    .map_err(|_| trc::StoreEvent::DataCorruption.into_err())?;
+                items.push((k.to_owned(), decode(v)?));
+                Ok(items.len() < limit)
+            },
+        )
         .await?;
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use store::backend::ephemeral::EphemeralStore;
+
+    #[test]
+    fn serialization_errors_and_size_limits_are_recoverable() {
+        struct Failing;
+        impl Serialize for Failing {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("failed"))
+            }
+        }
+        let mut batch = BatchBuilder::new();
+        assert!(put(&mut batch, "delivery/test", &Failing).is_err());
+        let exact = "x".repeat(MAX_RECORD_BYTES - 2);
+        assert_eq!(encode(&exact).unwrap().len(), MAX_RECORD_BYTES);
+        assert!(encode(&(exact + "x")).is_err());
+        assert!(encode(&"\0".repeat(MAX_RECORD_BYTES / 6 + 1)).is_err());
+        assert!(encode(&"🦀".repeat(MAX_RECORD_BYTES / 4)).is_err());
+        assert!(decode::<String>(&vec![b' '; MAX_RECORD_BYTES + 1]).is_err());
+        assert!(decode::<DeliveryEvent>(b"{broken").is_err());
+    }
+
+    #[tokio::test]
+    async fn range_limits_never_return_partial_results_on_overflow() {
+        let store = EphemeralStore::open();
+        let mut batch = BatchBuilder::new();
+        for i in 0..=MAX_RANGE_BYTES / MAX_RECORD_BYTES {
+            put(
+                &mut batch,
+                &format!("delivery/test/{i:02}"),
+                &"x".repeat(MAX_RECORD_BYTES - 2),
+            )
+            .unwrap();
+        }
+        store.write_batch(&mut batch).await.unwrap();
+        assert!(
+            delivery_range::<String>(&store, "delivery/test/", "delivery/test/~", 0)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            delivery_range::<String>(&store, "delivery/test/", "delivery/test/~", 1)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            delivery_range::<String>(&store, "delivery/test/", "delivery/test/~", usize::MAX)
+                .await
+                .is_err()
+        );
+    }
+    #[tokio::test]
+    async fn range_record_limit_returns_error_instead_of_truncating() {
+        let store = EphemeralStore::open();
+        let mut batch = BatchBuilder::new();
+        for i in 0..=MAX_RANGE_RECORDS {
+            put(&mut batch, &format!("delivery/count/{i:05}"), &i).unwrap();
+        }
+        store.write_batch(&mut batch).await.unwrap();
+        assert_eq!(
+            delivery_range::<usize>(
+                &store,
+                "delivery/count/",
+                "delivery/count/~",
+                MAX_RANGE_RECORDS
+            )
+            .await
+            .unwrap()
+            .len(),
+            MAX_RANGE_RECORDS
+        );
+        assert!(
+            delivery_range::<usize>(&store, "delivery/count/", "delivery/count/~", usize::MAX)
+                .await
+                .is_err()
+        );
+    }
 }

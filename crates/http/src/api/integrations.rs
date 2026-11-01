@@ -96,16 +96,16 @@ fn generate_id() -> String {
         .collect()
 }
 
-fn issue_credentials(batch: &mut BatchBuilder, app_id: &str) -> AppCredentials {
+fn issue_credentials(batch: &mut BatchBuilder, app_id: &str) -> trc::Result<AppCredentials> {
     let credentials = AppCredentials {
         api_key: generate_id(),
         token: generate_id(),
     };
     let index = api_key_index(&credentials.api_key);
     batch.assert_value(class(&index), AssertValue::None);
-    put(batch, &index, &app_id);
-    put(batch, &credential_key(app_id), &credentials);
-    credentials
+    put(batch, &index, &app_id)?;
+    put(batch, &credential_key(app_id), &credentials)?;
+    Ok(credentials)
 }
 
 fn revoke_credentials(batch: &mut BatchBuilder, credentials: &AppCredentials) {
@@ -173,8 +173,8 @@ pub async fn handle(
             let key = app_key(&id);
             let mut batch = BatchBuilder::new();
             batch.assert_value(class(&key), AssertValue::None);
-            let credentials = issue_credentials(&mut batch, &id);
-            put(&mut batch, &key, &record);
+            let credentials = issue_credentials(&mut batch, &id)?;
+            put(&mut batch, &key, &record)?;
             server.store().write_batch(&mut batch).await?;
             return Ok(JsonResponse::with_status(StatusCode::CREATED, record.app)
                 .no_cache()
@@ -225,7 +225,7 @@ pub async fn handle(
         let mut batch = BatchBuilder::new();
         batch.assert_value(class(&key), AssertValue::Some);
         revoke_credentials(&mut batch, &previous);
-        let credentials = issue_credentials(&mut batch, id);
+        let credentials = issue_credentials(&mut batch, id)?;
         return match server.store().write_batch(&mut batch).await {
             Ok(_) => Ok(JsonResponse::new(credentials)
                 .no_cache()
@@ -260,7 +260,7 @@ pub async fn handle(
             let Some(record) = input.into_record(id, Some(current)) else {
                 return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
             };
-            put(&mut batch, &key, &record);
+            put(&mut batch, &key, &record)?;
         }
         Method::POST => return Ok(HttpResponse::new(StatusCode::METHOD_NOT_ALLOWED)),
         _ => return Ok(forbidden()),

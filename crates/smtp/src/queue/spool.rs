@@ -8,7 +8,7 @@ use super::{
     ArchivedMessage, ArchivedStatus, Message, MessageSource, Metadata, QueueEnvelope, QueueId,
     Recipient, Schedule, eval_strategy,
 };
-use crate::inbound::dkim::{DkimSign, SignedMessage};
+use crate::inbound::dkim::{DkimSign, SignedMessage, strip_app_credentials};
 use crate::queue::MessageWrapper;
 use crate::queue::quota::QuotaReservation;
 use ahash::{AHashMap, AHashSet};
@@ -412,7 +412,21 @@ pub(crate) struct QueueParams<'x, 'y> {
 
 impl MessageWrapper {
     #[must_use]
-    pub(crate) async fn queue<'x, 'y>(mut self, mut params: QueueParams<'x, 'y>) -> QueueOutcome {
+    pub(crate) async fn queue<'x, 'y>(mut self, params: QueueParams<'x, 'y>) -> QueueOutcome {
+        let clean_message = strip_app_credentials(params.raw_message);
+        let clean_headers = params.raw_headers.and_then(strip_app_credentials);
+        if let Some(clean_message) = &clean_message {
+            self.message.size =
+                self.message.size.saturating_sub(
+                    params.raw_message.len().saturating_sub(clean_message.len()) as u64,
+                );
+        }
+        let mut params = QueueParams {
+            raw_message: clean_message.as_deref().unwrap_or(params.raw_message),
+            raw_headers: clean_headers.as_deref().or(params.raw_headers),
+            ..params
+        };
+
         // Add DKIM signatures
         let SignedMessage {
             headers: dkim_headers,
@@ -513,7 +527,10 @@ impl MessageWrapper {
         // Write message to queue
         let mut batch = BatchBuilder::new();
 
-        self.record_tracking(server, &mut batch, false, None);
+        if let Err(err) = self.record_tracking(server, &mut batch, false, None) {
+            trc::error!(err);
+            return QueueOutcome::Failed;
+        }
 
         // Reserve quotas
         for quota in &quotas {
@@ -768,12 +785,15 @@ impl MessageWrapper {
     ) -> bool {
         // Release quota for completed deliveries
         let mut batch = BatchBuilder::new();
-        self.record_tracking(
+        if let Err(err) = self.record_tracking(
             server,
             &mut batch,
             false,
             self.is_multi_queue.then_some(self.queue_name),
-        );
+        ) {
+            trc::error!(err);
+            return false;
+        }
         let released_quotas = self.release_quota(&mut batch);
 
         // Update message queue
@@ -919,7 +939,10 @@ impl MessageWrapper {
                 to: BlobLink::Id { id: self.queue_id },
             })
             .clear(ValueClass::Queue(QueueClass::Message(self.queue_id)));
-        self.record_tracking(server, &mut batch, true, None);
+        if let Err(err) = self.record_tracking(server, &mut batch, true, None) {
+            trc::error!(err);
+            return false;
+        }
         self.write_delivery_results(&mut batch);
 
         let result = match server.store().write_batch(&mut batch).await {
@@ -961,7 +984,10 @@ impl MessageWrapper {
     ) -> RegistryWrite {
         let mut write = LockedWrite::new(self.queue_id, self.span_id, &self.message);
         let batch = &mut write.batch;
-        self.record_tracking(server, batch, false, None);
+        if let Err(err) = self.record_tracking(server, batch, false, None) {
+            trc::error!(err);
+            return RegistryWrite::Failed;
+        }
         let released_quotas = self.release_quota(batch);
 
         for (queue_name, due) in prev_events {
@@ -1056,7 +1082,10 @@ impl MessageWrapper {
         }
         // SPDX-SnippetEnd
 
-        self.record_tracking(server, batch, true, None);
+        if let Err(err) = self.record_tracking(server, batch, true, None) {
+            trc::error!(err);
+            return RegistryWrite::Failed;
+        }
         self.write_delivery_results(batch);
         for metadata in self.message.metadata {
             match metadata {
