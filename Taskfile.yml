@@ -1,0 +1,18 @@
+version: '3'
+
+tasks:
+  run:
+    desc: Run Stalwart locally with Cargo
+    cmds:
+      - |
+        set -eu
+        export CONFIG_PATH="${CONFIG_PATH:-$PWD/.stalwart-local/config.json}"
+        mkdir -p "$(dirname "$CONFIG_PATH")"
+        export STALWART_HOSTNAME="${STALWART_HOSTNAME:-localhost}"
+        export STALWART_PUBLIC_URL="${STALWART_PUBLIC_URL:-http://localhost:8080}"
+        exec cargo run --locked -p stalwart --no-default-features --features "${STALWART_FEATURES:-sqlite,postgres,enterprise}"
+
+  docker:build:
+    desc: Build the local Stalwart Docker image
+    cmds:
+      - docker build --tag "${IMAGE:-stalwart:local}" .
