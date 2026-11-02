@@ -10,7 +10,10 @@ tasks:
         mkdir -p "$(dirname "$CONFIG_PATH")"
         export STALWART_HOSTNAME="${STALWART_HOSTNAME:-localhost}"
         export STALWART_PUBLIC_URL="${STALWART_PUBLIC_URL:-http://localhost:8080}"
-        exec cargo run --locked -p stalwart --no-default-features --features "${STALWART_FEATURES:-sqlite,postgres,enterprise}"
+        if [ "$CONFIG_PATH" = "$PWD/.stalwart-local/config.json" ] && [ -z "${STALWART_RECOVERY_ADMIN+x}" ] && [ -s "$PWD/.stalwart-local/admin-password" ]; then
+          export STALWART_RECOVERY_ADMIN="admin:$(cat "$PWD/.stalwart-local/admin-password")"
+        fi
+        exec cargo +"${STALWART_TOOLCHAIN:-1.98.0}" run --locked -p stalwart --no-default-features --features "${STALWART_FEATURES:-sqlite,postgres}"
 
   docker:build:
     desc: Build the local Stalwart Docker image
