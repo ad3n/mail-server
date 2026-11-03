@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
 import { useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MoreHorizontal, Plus } from 'lucide-react';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Check, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { apiFetch, apiFetchJson } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CopyButton } from '@/components/common/CopyButton';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { FloatingActionBar, FloatingActionDivider, FloatingActionDot } from '@/components/common/FloatingActionBar';
+import { UnsavedChangesDialog } from '@/components/forms/UnsavedChangesDialog';
+import { useUnsavedChangesGuard } from '@/components/forms/useUnsavedChangesGuard';
 import { FormSectionCard } from '@/components/forms/FormSections';
 import { ListTable } from '@/components/lists/ListTable';
 import { ListError, ListSpinner } from '@/components/lists/ListStates';
@@ -52,6 +55,7 @@ interface Credentials {
   appKey: string;
   appToken: string;
 }
+const listPath = '/Management/x:IntegrationApp';
 const endpoint = '/api/integrations/apps';
 const columns = [
   { name: 'name', label: 'Name' },
@@ -64,12 +68,16 @@ function AppForm({
   busy,
   cancel,
   save,
+  requestDelete,
 }: {
   app?: App;
   busy: boolean;
   cancel: () => void;
-  save: (input: AppInput) => void;
+  save: (input: AppInput, allowNavigation: () => void) => void;
+  requestDelete: (app: App, allowNavigation: () => void) => void;
 }) {
+  const [dirty, setDirty] = useState(false);
+  const guard = useUnsavedChangesGuard(dirty);
   const previous = app?.webhookAuth;
   const [authType, setAuthType] = useState<AuthType>(previous?.type ?? 'none');
   const [url, setUrl] = useState(app?.webhookUrl ?? '');
@@ -110,10 +118,10 @@ function AppForm({
     }
     const webhookSecrets: Record<string, string> = {};
     for (const field of ['password', 'apiKey', 'token']) if (text(field)) webhookSecrets[field] = text(field);
-    save({ name: text('name').trim(), webhookUrl: url.trim(), webhookAuth, webhookSecrets });
+    save({ name: text('name').trim(), webhookUrl: url.trim(), webhookAuth, webhookSecrets }, guard.allowNextNavigation);
   }
   return (
-    <form onSubmit={submit} className="space-y-3.5">
+    <form onSubmit={submit} onChange={() => setDirty(true)} className="mx-auto max-w-5xl space-y-5">
       <header className="flex items-start gap-3.5 px-1 pb-1 pt-3">
         <Button type="button" variant="outline" size="icon-lg" aria-label="Back" onClick={cancel} disabled={busy}>
           <ArrowLeft />
@@ -141,7 +149,13 @@ function AppForm({
           <label htmlFor="webhook-auth-type" className="text-sm font-semibold">
             Auth type
           </label>
-          <Select value={authType} onValueChange={(val) => setAuthType(val as AuthType)}>
+          <Select
+            value={authType}
+            onValueChange={(val) => {
+              setAuthType(val as AuthType);
+              setDirty(true);
+            }}
+          >
             <SelectTrigger id="webhook-auth-type" className="sm:col-span-2 w-full">
               <SelectValue />
             </SelectTrigger>
@@ -186,28 +200,64 @@ function AppForm({
           </div>
         )}
       </FormSectionCard>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" disabled={busy} onClick={cancel}>
+      <FloatingActionBar label="Form actions">
+        {app && (
+          <>
+            <Button
+              type="button"
+              variant="ink-danger"
+              size="sm"
+              disabled={busy}
+              onClick={() => requestDelete(app, guard.allowNextNavigation)}
+            >
+              <Trash2 aria-hidden /> Delete
+            </Button>
+            <FloatingActionDivider />
+          </>
+        )}
+        {dirty && (
+          <span className="flex items-center gap-2 px-2 text-[13px] text-ink-muted max-sm:hidden">
+            <FloatingActionDot /> Unsaved changes
+          </span>
+        )}
+        <Button type="button" variant="ink" size="sm" disabled={busy} onClick={cancel}>
           Cancel
         </Button>
-        <Button disabled={busy}>Save</Button>
-      </div>
+        <Button type="submit" size="sm" disabled={busy || (!!app && !dirty)}>
+          <Check aria-hidden /> {app ? 'Save' : 'Create'}
+        </Button>
+      </FloatingActionBar>
+      <UnsavedChangesDialog blocker={guard.blocker} />
     </form>
   );
 }
 
-export function IntegrationApps() {
+export function IntegrationApps({ id }: { id?: string }) {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const queryClient = useQueryClient();
   const account = useAuthStore((s) => s.activeAccountId);
   const schema = useSchemaStore((s) => s.schema);
+  const listKey = ['integration-apps', account];
   const apps = useQuery({
-    queryKey: ['integration-apps', account],
+    enabled: !id,
+    queryKey: listKey,
     queryFn: ({ signal }) => apiFetchJson<App[]>(endpoint, { signal }),
   });
-  const [params, setParams] = useSearchParams();
-  const editing = params.get('edit');
-  const app = apps.data?.find((a) => a.appId === editing);
+  const editing = id !== 'new' ? id : undefined;
+  const detail = useQuery({
+    queryKey: [...listKey, editing],
+    enabled: !!editing,
+    gcTime: 0,
+    queryFn: ({ signal }) => apiFetchJson<App>(endpoint + '/' + encodeURIComponent(editing!), { signal }),
+  });
+  const app = detail.data;
   const [credentials, setCredentials] = useState<({ name: string } & Credentials) | null>(null);
-  const [confirm, setConfirm] = useState<{ action: 'Delete' | 'Regenerate'; app: App } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    action: 'Delete' | 'Regenerate';
+    app: App;
+    allowNavigation?: () => void;
+  } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -223,10 +273,10 @@ export function IntegrationApps() {
     }
   }
   function list() {
-    setParams({});
+    navigate(listPath);
     setError('');
   }
-  async function save(input: AppInput) {
+  async function save(input: AppInput, allowNavigation: () => void) {
     await run(async () => {
       const res = await apiFetch(app ? endpoint + '/' + app.appId : endpoint, {
         method: app ? 'PUT' : 'POST',
@@ -239,8 +289,9 @@ export function IntegrationApps() {
           appKey: res.headers.get('App-Key')!,
           appToken: res.headers.get('App-Token')!,
         });
+      allowNavigation();
       list();
-      await apps.refetch();
+      await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
     });
   }
   async function show(target: App, rotate = false) {
@@ -255,16 +306,35 @@ export function IntegrationApps() {
     setCredentials({ name: target.name, ...values });
   }
 
-  if (!schema || apps.isPending) return <ListSpinner />;
-  if (apps.error) return <ListError message={apps.error.message} onRetry={() => void apps.refetch()} />;
-  const items = apps.data.map((a) => ({ ...a, id: a.appId, authType: authLabels[a.webhookAuth?.type ?? 'none'] }));
+  if (!id && (params.get('edit') || params.has('create'))) {
+    return <Navigate replace to={listPath + '/' + encodeURIComponent(params.get('edit') || 'new')} />;
+  }
+  const activeQuery = editing ? detail : !id ? apps : null;
+  if (!schema || activeQuery?.isPending) return <ListSpinner />;
+  if (activeQuery?.error)
+    return (
+      <ListError
+        message={activeQuery.error.message}
+        onRetry={() => void activeQuery.refetch()}
+        onDismiss={id ? list : undefined}
+      />
+    );
+  const records = apps.data ?? [];
+  const items = records.map((a) => ({ ...a, id: a.appId, authType: authLabels[a.webhookAuth?.type ?? 'none'] }));
   return (
     <div className="space-y-3.5">
       {error && <ListError message={error} onDismiss={() => setError('')} />}
       {editing && !app ? (
         <ListError message="App not found." onDismiss={list} />
-      ) : app || params.has('create') ? (
-        <AppForm key={app?.appId ?? 'new'} app={app} busy={busy} cancel={list} save={save} />
+      ) : app || id === 'new' ? (
+        <AppForm
+          key={app?.appId ?? 'new'}
+          app={app}
+          busy={busy}
+          cancel={list}
+          save={save}
+          requestDelete={(app, allowNavigation) => setConfirm({ action: 'Delete', app, allowNavigation })}
+        />
       ) : (
         <>
           <header className="flex flex-wrap items-end justify-between gap-4 px-1 pb-1 pt-3">
@@ -274,7 +344,7 @@ export function IntegrationApps() {
                 Manage delivery webhooks and application credentials.
               </p>
             </div>
-            <Button onClick={() => setParams({ create: '1' })}>
+            <Button onClick={() => navigate(listPath + '/new')}>
               <Plus aria-hidden />
               Create app
             </Button>
@@ -291,12 +361,12 @@ export function IntegrationApps() {
               sortable={new Set()}
               onSort={() => {}}
               selection={null}
-              rowHref={(id) => '?edit=' + encodeURIComponent(id)}
+              rowHref={(id) => listPath + '/' + encodeURIComponent(id)}
               rowLabel={(item) => String(item.name)}
               loading={false}
               busy={busy || apps.isFetching}
               renderRowActions={(_, id, name) => {
-                const target = apps.data.find((a) => a.appId === id)!;
+                const target = records.find((a) => a.appId === id)!;
                 return (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -305,7 +375,9 @@ export function IntegrationApps() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => setParams({ edit: id })}>Edit</DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to={listPath + '/' + encodeURIComponent(id)}>Edit</Link>
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => void run(() => show(target))}>
                         View credentials
                       </DropdownMenuItem>
@@ -346,7 +418,11 @@ export function IntegrationApps() {
             if (confirm.action === 'Regenerate') await show(confirm.app, true);
             else {
               await apiFetch(endpoint + '/' + confirm.app.appId, { method: 'DELETE' });
-              await apps.refetch();
+              if (confirm.allowNavigation) {
+                confirm.allowNavigation();
+                list();
+              }
+              await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
             }
           })
         }

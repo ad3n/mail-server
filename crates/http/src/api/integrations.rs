@@ -126,9 +126,12 @@ pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> O
         .parse()
         .ok()?;
     let scheme = page.scheme_str()?;
+    let path = page
+        .path()
+        .strip_prefix("/admin/Management/x:IntegrationApp")?;
     if !matches!(scheme, "http" | "https")
         || !page.authority()?.as_str().eq_ignore_ascii_case(authority)
-        || page.path() != "/admin/Management/x:IntegrationApp"
+        || !(path.is_empty() || path.strip_prefix('/').is_some_and(valid_id))
     {
         return None;
     }
@@ -325,6 +328,28 @@ mod tests {
         assert_eq!(
             apps_page_origin(&headers, host).as_deref(),
             Some("http://localhost:8080")
+        );
+        for path in ["/new", "/app-123"] {
+            headers.insert(
+                REFERER,
+                format!("http://localhost:8080/admin/Management/x:IntegrationApp{path}")
+                    .parse()
+                    .unwrap(),
+            );
+            assert!(apps_page_origin(&headers, host).is_some());
+        }
+        for path in ["Extra", "/id/more", "/.."] {
+            headers.insert(
+                REFERER,
+                format!("http://localhost:8080/admin/Management/x:IntegrationApp{path}")
+                    .parse()
+                    .unwrap(),
+            );
+            assert!(apps_page_origin(&headers, host).is_none());
+        }
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("http://localhost:8080/admin/Management/x:IntegrationApp/new"),
         );
         assert!(apps_page_origin(&headers, "elsewhere.example").is_none());
         headers.insert(ORIGIN, HeaderValue::from_static("http://elsewhere.example"));
