@@ -67,13 +67,13 @@ async fn deliver(
     callback: DeliveryEvent,
 ) -> trc::Result<()> {
     // Moving the job grants this worker a lease. Another node can retry after a crash.
-    let payload = encode(&callback)?;
-    let lease = callback_key(now().saturating_add(60), &callback.event_id);
+    let stored = encode(&callback)?;
+    let lease = callback_key(now().saturating_add(60), &callback.delivery.event_id);
     let mut claim = BatchBuilder::new();
     claim
         .assert_value(class(&key), AssertValue::Some)
         .clear(class(&key));
-    claim.set(class(&lease), payload.clone());
+    claim.set(class(&lease), stored);
     match store.write_batch(&mut claim).await {
         Err(e) if e.is_assertion_failure() => return Ok(()),
         result => {
@@ -83,7 +83,8 @@ async fn deliver(
 
     drop(claim);
 
-    if let Some(app) = delivery_get::<StoredApp>(store, &app_key(&callback.app_id)).await? {
+    if let Some(app) = delivery_get::<StoredApp>(store, &app_key(&callback.delivery.app_id)).await?
+    {
         let headers = app
             .app
             .webhook_auth
@@ -93,6 +94,8 @@ async fn deliver(
                     .into_err()
                     .details("Invalid webhook authentication settings")
             })?;
+        let event_id = callback.delivery.event_id.clone();
+        let payload = encode(&callback.into_status()?)?;
         let sent = match client.request(reqwest::Method::POST, &app.app.webhook_url) {
             Ok(request) => request
                 .headers(headers)
@@ -108,7 +111,7 @@ async fn deliver(
             trc::event!(
                 Telemetry(trc::TelemetryEvent::WebhookError),
                 Details = "App delivery callback failed; retry scheduled",
-                Id = callback.event_id,
+                Id = event_id,
                 NextRetry = trc::Value::Timestamp(now().saturating_add(60))
             );
             return Ok(());
@@ -192,16 +195,16 @@ mod tests {
             webhook_auth: WebhookAuth::None,
         };
         let callback = DeliveryEvent {
-            event_id: "unique".into(),
-            app_id: "sales".into(),
-            external_id: "00042".into(),
-            queue_id: "abcd".into(),
-            recipient: "a@example.com".into(),
-            status: "accepted".into(),
+            created_at: Some(0),
             updated_at: 1,
-            details: "OK".into(),
-            smtp_code: Some(250),
-            hostname: None,
+            delivery: DeliveryEventData {
+                event_id: "unique".into(),
+                app_id: "sales".into(),
+                external_id: "00042".into(),
+                queue_id: "abcd".into(),
+                recipient: "a@example.com".into(),
+                status: "accepted".into(),
+            },
         };
         let mut batch = BatchBuilder::new();
         put(&mut batch, &app_key("sales"), &app).unwrap();
@@ -258,6 +261,8 @@ mod tests {
             .unwrap();
         assert_eq!(bodies[0], bodies[1]);
         let payload: serde_json::Value = serde_json::from_slice(&bodies[0]).unwrap();
+        assert_eq!(payload["createdAt"], "1970-01-01T00:00:00Z");
+        assert_eq!(payload["updatedAt"], "1970-01-01T00:00:01Z");
         assert_eq!(payload["externalId"], "00042");
         assert_eq!(payload["eventId"], "unique");
         assert!(payload.get("events").is_none());

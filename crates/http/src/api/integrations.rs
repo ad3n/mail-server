@@ -155,12 +155,12 @@ pub async fn lookup(
         return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
     }
     let prefix = result_prefix(&app_id, external_id);
-    let results: Vec<DeliveryEvent> =
+    let results: Vec<DeliveryStatus> =
         delivery_range::<DeliveryEvent>(server.store(), &prefix, &format!("{prefix}~"), usize::MAX)
             .await?
             .into_iter()
-            .map(|(_, event)| event)
-            .collect();
+            .map(|(_, event)| event.into_status())
+            .collect::<trc::Result<_>>()?;
     if results.is_empty() {
         return Ok(HttpResponse::new(StatusCode::NOT_FOUND).with_no_store());
     }
@@ -669,7 +669,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             rows.iter()
-                .map(|(_, e)| e.status.as_str())
+                .map(|(_, e)| e.delivery.status.as_str())
                 .collect::<Vec<_>>(),
             ["failed", "removed"]
         );
@@ -683,8 +683,8 @@ mod tests {
         .unwrap();
         assert_eq!(jobs.len(), 4);
         assert!(
-            jobs.iter()
-                .all(|(_, c)| c.external_id == "00042" && c.app_id == registered.app_id)
+            jobs.iter().all(|(_, c)| c.delivery.external_id == "00042"
+                && c.delivery.app_id == registered.app_id)
         );
         assert_eq!(
             handle(&server, admin(), &app_path, &Method::DELETE, None)

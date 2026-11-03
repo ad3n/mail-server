@@ -25,7 +25,7 @@ curl -i -H "App-Key: $APP_KEY" -H "App-Token: $APP_TOKEN" \
 
 Pembacaan daftar Apps dan status dibatasi hingga 10.000 record dan total 16 MiB data tersimpan per request. Jika batas terlampaui, request gagal dengan error server tanpa mengembalikan hasil parsial. Setiap record tracking dibatasi 256 KiB JSON. Batas ini melindungi penggunaan memori dan belum menyediakan pagination.
 
-HTTP 200 menghasilkan array status per penerima. HTTP 401 menunjukkan kredensial tidak cocok. HTTP 404 berarti tidak ada hasil yang dapat diakses untuk External-ID itu.
+HTTP 200 menghasilkan array status per penerima. Pada respons status dan webhook, `createdAt` menunjukkan waktu pesan masuk antrean dan `updatedAt` menunjukkan waktu perubahan status penerima. Keduanya menggunakan RFC 3339 dalam UTC. HTTP 401 menunjukkan kredensial tidak cocok. HTTP 404 berarti tidak ada hasil yang dapat diakses untuk External-ID itu.
 
 ## Autentikasi webhook keluar
 

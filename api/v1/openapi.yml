@@ -469,7 +469,7 @@ components:
   schemas:
     AppDeliveryEvent:
       type: object
-      required: [eventId, appId, externalId, queueId, recipient, status, updatedAt, details]
+      required: [eventId, appId, externalId, queueId, recipient, status, createdAt, updatedAt]
       properties:
         eventId: {type: string, description: Stable across retries of this callback}
         appId: {type: string}
@@ -477,10 +477,8 @@ components:
         queueId: {type: string, description: Hexadecimal SMTP queue identifier}
         recipient: {type: string}
         status: {type: string, enum: [queued, deferred, accepted, failed, removed]}
-        updatedAt: {type: integer, format: int64, description: Unix timestamp in seconds}
-        details: {type: string, description: SMTP reply or diagnostic when available}
-        smtpCode: {type: integer, description: SMTP response code when available}
-        hostname: {type: string, description: Server that accepted delivery when available}
+        createdAt: {type: string, format: date-time, description: UTC time the message entered the queue}
+        updatedAt: {type: string, format: date-time, description: UTC time this recipient status was recorded}
     LoginRequest:
       type: object
       description: |

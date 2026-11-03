@@ -3,7 +3,9 @@
 use super::{Message, MessageWrapper, Metadata, Status};
 use common::Server;
 use common::config::smtp::queue::QueueName;
-use common::delivery_tracking::{DeliveryEvent, callback_key, class, encode, result_prefix};
+use common::delivery_tracking::{
+    DeliveryEvent, DeliveryEventData, callback_key, class, encode, result_prefix,
+};
 use store::write::{BatchBuilder, now};
 
 #[derive(
@@ -71,37 +73,20 @@ impl MessageWrapper {
             {
                 continue;
             }
-            let (smtp_code, hostname) = match &rcpt.status {
-                Status::Completed(r) => (Some(r.response.code), Some(r.hostname.to_string())),
-                Status::TemporaryFailure(e) | Status::PermanentFailure(e) => {
-                    let code = match &e.details {
-                        super::Error::UnexpectedResponse(r) => Some(r.response.code),
-                        _ => None,
-                    };
-                    (code, None)
-                }
-                Status::Scheduled => (None, None),
-            };
             let event = DeliveryEvent {
-                smtp_code,
-                hostname,
-                event_id: format!(
-                    "{:x}-{i}-{:016x}",
-                    self.queue_id,
-                    server.inner.data.queue_id_gen.generate()
-                ),
-                app_id: t.app_id.clone(),
-                external_id: t.external_id.clone(),
-                queue_id: format!("{:x}", self.queue_id),
-                recipient: rcpt.address.to_string(),
+                created_at: Some(self.message.created),
                 updated_at: timestamp,
-                status: status.into(),
-                details: match &rcpt.status {
-                    Status::Completed(r) => format!("{} {}", r.response.code, r.response.message),
-                    Status::TemporaryFailure(e) | Status::PermanentFailure(e) => {
-                        e.details.to_string()
-                    }
-                    Status::Scheduled => String::new(),
+                delivery: DeliveryEventData {
+                    event_id: format!(
+                        "{:x}-{i}-{:016x}",
+                        self.queue_id,
+                        server.inner.data.queue_id_gen.generate()
+                    ),
+                    app_id: t.app_id.clone(),
+                    external_id: t.external_id.clone(),
+                    queue_id: format!("{:x}", self.queue_id),
+                    recipient: rcpt.address.to_string(),
+                    status: status.into(),
                 },
             };
             let result = format!(
@@ -111,7 +96,10 @@ impl MessageWrapper {
             );
             let encoded = encode(&event)?;
             batch.set(class(&result), encoded.clone());
-            batch.set(class(&callback_key(timestamp, &event.event_id)), encoded);
+            batch.set(
+                class(&callback_key(timestamp, &event.delivery.event_id)),
+                encoded,
+            );
         }
         Ok(())
     }

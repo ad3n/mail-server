@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
 
+use registry::types::datetime::UTCDateTime;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::{self, Write};
 use store::Store;
@@ -169,18 +170,50 @@ impl WebhookAuth {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryEvent {
+    #[serde(flatten)]
+    pub delivery: DeliveryEventData,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+    pub updated_at: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryStatus {
+    #[serde(flatten)]
+    delivery: DeliveryEventData,
+    created_at: UTCDateTime,
+    updated_at: UTCDateTime,
+}
+
+impl DeliveryEvent {
+    pub fn into_status(self) -> trc::Result<DeliveryStatus> {
+        let created_at = match self.created_at {
+            Some(timestamp) => timestamp,
+            None => {
+                // Older result and outbox records only carry creation time in the queue ID.
+                let id = u64::from_str_radix(&self.delivery.queue_id, 16)
+                    .map_err(|_| trc::StoreEvent::DataCorruption.into_err())?;
+                utils::snowflake::SnowflakeIdGenerator::to_timestamp(id)
+            }
+        };
+        Ok(DeliveryStatus {
+            delivery: self.delivery,
+            created_at: UTCDateTime::from_timestamp(created_at as i64),
+            updated_at: UTCDateTime::from_timestamp(self.updated_at as i64),
+        })
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryEventData {
     pub event_id: String,
     pub app_id: String,
     pub external_id: String,
     pub queue_id: String,
     pub recipient: String,
     pub status: String,
-    pub updated_at: u64,
-    pub details: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub smtp_code: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hostname: Option<String>,
 }
 
 pub fn valid_id(s: &str) -> bool {
@@ -310,6 +343,25 @@ pub async fn delivery_range<T: DeserializeOwned + Send + Sync>(
 mod tests {
     use super::*;
     use store::backend::ephemeral::EphemeralStore;
+
+    #[test]
+    fn legacy_delivery_uses_queue_creation_time_and_current_payload_fields() {
+        let old = serde_json::json!({
+            "eventId":"event", "appId":"app", "externalId":"external", "queueId":"4b27b0479e00000",
+            "recipient":"a@example.com", "status":"accepted", "updatedAt":1793674265,
+            "details":"250 OK", "smtpCode":250, "hostname":"localhost"
+        });
+        let stored: DeliveryEvent = serde_json::from_value(old).unwrap();
+        let status = serde_json::to_value(stored.into_status().unwrap()).unwrap();
+        assert_eq!(
+            status,
+            serde_json::json!({
+                "eventId":"event", "appId":"app", "externalId":"external", "queueId":"4b27b0479e00000",
+                "recipient":"a@example.com", "status":"accepted",
+                "createdAt":"2026-11-03T02:50:05Z", "updatedAt":"2026-11-03T02:51:05Z"
+            })
+        );
+    }
 
     #[test]
     fn serialization_errors_and_size_limits_are_recoverable() {
