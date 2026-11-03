@@ -903,6 +903,10 @@ fn map_error_details(err_in: &ArchivedErrorDetails) -> DeliveryError {
             err_out.error_type = DeliveryErrorType::MtaStsError;
             err_out.error_message = e.to_string().into();
         }
+        ArchivedError::EncryptionError(e) => {
+            err_out.error_type = DeliveryErrorType::EncryptionError;
+            err_out.error_message = e.to_string().into();
+        }
         ArchivedError::RateLimited => {
             err_out.error_type = DeliveryErrorType::RateLimited;
         }

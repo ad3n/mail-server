@@ -115,10 +115,11 @@ mod compatibility_tests {
         QueueCount { key: u128, id: u64 },
         Headers { value: Box<[u8]>, id: u64 },
         Submission { account_id: u32 },
+        Tracking(Box<Tracking>),
     }
 
     #[test]
-    fn reads_metadata_archived_before_tracking_was_added() {
+    fn reads_metadata_archived_before_recipient_blobs_were_added() {
         let old = vec![
             LegacyMetadata::QueueSize {
                 key: u128::MAX,
@@ -130,6 +131,10 @@ mod compatibility_tests {
                 id: 7,
             },
             LegacyMetadata::Submission { account_id: 42 },
+            LegacyMetadata::Tracking(Box::new(Tracking {
+                app_id: "legacy-app".into(),
+                external_id: "legacy-id".into(),
+            })),
         ];
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&old).unwrap();
         let restored = rkyv::from_bytes::<Vec<Metadata>, rkyv::rancor::Error>(&bytes).unwrap();
@@ -146,6 +151,10 @@ mod compatibility_tests {
                     id: 7
                 },
                 Metadata::Submission { account_id: 42 },
+                Metadata::Tracking(Box::new(Tracking {
+                    app_id: "legacy-app".into(),
+                    external_id: "legacy-id".into(),
+                })),
             ]
         );
     }

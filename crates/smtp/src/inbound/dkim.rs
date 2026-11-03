@@ -21,7 +21,7 @@ use mail_auth::{
 };
 use mail_parser::HeaderForm;
 use memchr::memchr_iter;
-use std::{iter::once, sync::Arc};
+use std::{borrow::Cow, iter::once, sync::Arc};
 use trc::{Dkim2Event, EventType};
 use utils::sanitize_email;
 
@@ -78,7 +78,10 @@ impl DkimSign for Server {
         params: &mut QueueParams<'_, '_>,
     ) -> SignedMessage {
         let signers = params.dkim_signers.take();
-        let dkim2 = signers.as_ref().and_then(|signers| signers.dkim2.as_ref());
+        let dkim2 = signers
+            .as_ref()
+            .filter(|_| !params.dkim1_only)
+            .and_then(|signers| signers.dkim2.as_ref());
         let chain_broken = params.dkim2_verified.is_some_and(|output| {
             matches!(
                 output.result(),
@@ -140,6 +143,7 @@ impl DkimSign for Server {
 
         SignedMessage {
             headers,
+            dkim2_signed: params.dkim2_signed,
             stripped_message,
         }
     }
@@ -208,7 +212,7 @@ impl DkimSign for Server {
                 message, params, dkim2, &modified, original, verified, headers,
             ) {
                 Ok(()) => return None,
-                Err(mail_auth::Error::Dkim2(Dkim2Error::NotValidlySigned)) => {}
+                Err(mail_auth::Error::Dkim2(Dkim2Error::NotFullyVerified)) => {}
                 Err(err) => {
                     log_dkim2_error(err, params.session_id);
                     if !has_chain {
@@ -286,8 +290,10 @@ impl DkimSign for Server {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct SignedMessage {
     pub headers: Vec<u8>,
+    pub dkim2_signed: bool,
     pub stripped_message: Option<Vec<u8>>,
 }
 
@@ -331,6 +337,13 @@ fn dkim2_sign(
     };
     let mut undisclosed = Vec::with_capacity(envelopes.undisclosed_recipients.len() + 1);
     for (pos, rcpt) in envelopes.undisclosed_recipients {
+        if params
+            .encrypted_recipients
+            .binary_search(&(pos as u64))
+            .is_ok()
+        {
+            continue;
+        }
         undisclosed.push((
             pos as u64,
             signer.sign_with_message_instance(
@@ -361,6 +374,7 @@ fn dkim2_sign(
             id,
         });
     }
+    params.dkim2_signed = true;
 
     Ok(())
 }
@@ -428,6 +442,10 @@ fn strip_headers(message: &[u8], matches: impl Fn(&[u8]) -> bool) -> Option<Vec<
     Some(stripped)
 }
 
+pub(crate) fn strip_signature_headers(message: &[u8]) -> Cow<'_, [u8]> {
+    strip_headers(message, is_signature_field).map_or(Cow::Borrowed(message), Cow::Owned)
+}
+
 pub(crate) fn has_dkim2_headers(message: &[u8]) -> bool {
     header_lines(message).any(|line| !is_continuation(line) && is_dkim2_field(line))
 }
@@ -446,6 +464,20 @@ fn header_lines(message: &[u8]) -> impl Iterator<Item = &[u8]> {
 
 fn is_continuation(line: &[u8]) -> bool {
     matches!(line.first(), Some(b' ' | b'\t'))
+}
+
+fn is_signature_field(line: &[u8]) -> bool {
+    line.split(|&ch| ch == b':').next().is_some_and(|name| {
+        hashify::set_ignore_case!(
+            name.trim_ascii(),
+            "dkim-signature",
+            "dkim2-signature",
+            "message-instance",
+            "arc-seal",
+            "arc-message-signature",
+            "arc-authentication-results"
+        )
+    })
 }
 
 fn is_dkim2_field(line: &[u8]) -> bool {
