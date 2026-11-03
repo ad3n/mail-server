@@ -18,7 +18,10 @@ use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use compact_str::{CompactString, format_compact};
-use registry::schema::{enums::CompressionAlgo, structs::Application};
+use registry::schema::{
+    enums::{CompressionAlgo, OAuthClientKind},
+    structs::Application,
+};
 use serde::Deserialize;
 use std::{
     borrow::Cow,
@@ -122,6 +125,24 @@ impl WebApplications {
 
     pub fn has_prefix(&self, prefix: &str) -> bool {
         self.routes.load().contains_key(prefix)
+    }
+
+    pub fn is_admin_ui_client(
+        &self,
+        client_id: &str,
+        kind: OAuthClientKind,
+        page_origin: &str,
+    ) -> bool {
+        self.applications.load().iter().any(|app| {
+            app.prefixes.iter().any(|prefix| prefix == "admin")
+                && match app.oauth_client_id.as_deref() {
+                    Some(configured) => client_id == configured,
+                    None => {
+                        kind == OAuthClientKind::FirstParty
+                            && client_id == format!("{page_origin}/admin/{APP_CLIENT_DOCUMENT}")
+                    }
+                }
+        })
     }
 
     pub fn is_first_party_client(

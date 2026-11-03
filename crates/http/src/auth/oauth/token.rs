@@ -494,6 +494,7 @@ impl TokenHandler for Server {
                     account_id: token_info.account_id,
                     account_name: account.name(),
                     credential_version: token_info.credential_version,
+                    recovery_ui_client: None,
                     refresh: next,
                     rotated_at,
                     scope: granted_scope,
@@ -565,6 +566,9 @@ impl TokenHandler for Server {
             account_id,
             account_name: account.name(),
             credential_version,
+            recovery_ui_client: (grant_id == RECOVERY_ADMIN_GRANT_ID
+                && request.client.is_first_party())
+            .then_some(request.client_id),
             refresh: TokenGrant {
                 id: grant_id,
                 generation: 0,
@@ -589,6 +593,7 @@ impl TokenHandler for Server {
                 response.account_id,
                 account_name,
                 response.refresh.id,
+                response.recovery_ui_client,
                 response.credential_version,
             )?,
             token_type: "bearer".to_string(),
@@ -639,6 +644,7 @@ pub struct GrantResponse<'x> {
     account_id: u32,
     account_name: &'x str,
     credential_version: u64,
+    recovery_ui_client: Option<&'x str>,
     refresh: TokenGrant,
     rotated_at: u64,
     scope: &'x str,

@@ -93,7 +93,7 @@ def main():
 def show_tracking(test_id, headers):
     connection = http.client.HTTPConnection(HOST, 8080, timeout=10)
     try:
-        connection.request("GET", f"/api/integrations/deliveries/{test_id}/status", headers=headers)
+        connection.request("GET", f"/api/deliveries/{test_id}/status", headers=headers)
         response = connection.getresponse()
         if response.status == 200:
             print("Status pengiriman:", response.read().decode())

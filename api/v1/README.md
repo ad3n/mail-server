@@ -1,42 +1,26 @@
 # Mengakses API Stalwart
 
-Impor `openapi.yml` ke Postman atau Swagger UI. Pilih server `http://localhost:8080` untuk instance lokal ini. Untuk deployment lain, gunakan origin HTTPS Stalwart. Di Swagger UI, gunakan **Authorize** sesuai operasi. Pada perintah berikut, `curl -u admin` akan meminta password admin Stalwart.
+Impor `openapi.yml` ke Postman atau Swagger UI. Pilih server `http://localhost:8080` untuk instance lokal ini. Untuk deployment lain, gunakan origin HTTPS Stalwart. Di Swagger UI, gunakan **Authorize** sesuai operasi.
 
 | Client | Endpoint | Autentikasi |
 |---|---|---|
 | Browser atau client OAuth | `GET /api/discover/{email}`, `POST /api/auth` | Discovery dan awal login dapat diakses tanpa token. Ikuti alur OAuth dan PKCE yang dijelaskan pada operasi login untuk mendapatkan access token. |
 | Pengguna Stalwart | `GET /api/account`, `GET /api/schema`, `GET /api/schema/{hash}` | HTTP Basic atau `Authorization: Bearer <access_token>`. Gunakan `curl -L` untuk mengikuti redirect schema. |
-| Admin sistem | `/api/integrations/apps` dan subpath-nya | Basic atau OAuth dengan izin admin sistem. Jika bearer token dibatasi scope, akses ini membutuhkan scope mail. |
-| Aplikasi pengirim | `GET /api/integrations/deliveries/{externalId}/status` | Kirim **kedua** header `App-Key` dan `App-Token` milik aplikasi. Hasilnya hanya mencakup pengiriman aplikasi tersebut. |
+| Aplikasi pengirim | `GET /api/deliveries/{externalId}/status` | Kirim **kedua** header `App-Key` dan `App-Token` milik aplikasi. Hasilnya hanya mencakup pengiriman aplikasi tersebut. |
 | Client diagnostik | `GET /api/token/{jenis}` dan `GET /api/live/…` | Basic atau Bearer dengan izin terkait. Untuk EventSource, ambil token berumur pendek dari endpoint token yang sesuai dan kirim sebagai `?token=…` ke stream. Tracing dan metrics memerlukan Enterprise. |
 
 ## Administrasi aplikasi
 
-```bash
-BASE=http://localhost:8080
-curl -u admin "$BASE/api/integrations/apps"
-
-curl -i -u admin -H 'Content-Type: application/json' \
-  -d '{"name":"Billing","webhookUrl":"https://billing.example.com/events","webhookAuth":{"type":"none"}}' \
-  "$BASE/api/integrations/apps"
-```
-
-Pembuatan sukses menghasilkan HTTP 201. Body berisi `appId`. Header respons memuat `App-Key` dan `App-Token` yang dihasilkan Stalwart. Untuk operasi berikut, ganti `APP_ID` dengan ID di body tersebut.
-
-| Operasi | Method dan path |
-|---|---|
-| Lihat atau edit aplikasi | `GET` atau `PUT /api/integrations/apps/APP_ID`. Untuk PUT, sertakan name dan webhookUrl. |
-| Ambil kredensial aplikasi | `GET /api/integrations/apps/APP_ID/credentials` |
-| Regenerasi kedua kredensial | `POST /api/integrations/apps/APP_ID/credentials/regenerate` dengan JSON `{}`. Pasangan lama langsung dicabut. |
-| Hapus aplikasi | `DELETE /api/integrations/apps/APP_ID` |
+Admin sistem mengelola aplikasi, webhook, serta kredensial melalui **Management → Directory → Apps** di `/admin/Management/x:IntegrationApp`.
 
 ## Pengiriman dan lookup
 
 Saat submission SMTP terautentikasi, tambahkan header pesan `External-ID`, `App-Key`, dan `App-Token`. Stalwart memverifikasi kredensial aplikasi sebelum mengambil nilai External-ID. Jika kredensial tidak lengkap, tidak valid, atau tidak ditemukan, pengiriman dilanjutkan tanpa tracking dan tanpa validasi External-ID. App-Key dan App-Token dibersihkan sebelum pengiriman ke penerima. External-ID hanya diambil dan dihapus ketika tracking aktif, sehingga header tersebut pada email tanpa tracking tetap dipertahankan. Kredensial valid tetap memerlukan tepat satu External-ID yang valid. Gangguan database autentikasi menghasilkan kegagalan SMTP sementara agar client dapat retry. Untuk membaca status, isi variabel dari kredensial aplikasi dan gunakan External-ID yang sama persis, termasuk nol di depan.
 
 ```bash
+BASE=http://localhost:8080
 curl -i -H "App-Key: $APP_KEY" -H "App-Token: $APP_TOKEN" \
-  "$BASE/api/integrations/deliveries/00042/status"
+  "$BASE/api/deliveries/00042/status"
 ```
 
 Pembacaan daftar Apps dan status dibatasi hingga 10.000 record dan total 16 MiB data tersimpan per request. Jika batas terlampaui, request gagal dengan error server tanpa mengembalikan hasil parsial. Setiap record tracking dibatasi 256 KiB JSON. Batas ini melindungi penggunaan memori dan belum menyediakan pagination.
@@ -55,4 +39,4 @@ Stalwart mengirim satu POST JSON per perubahan status ke `webhookUrl`. Konfigura
 | API Key | `{"type":"apiKey","keyHeader":"X-Api-Key"}` | `{"apiKey":"…"}` |
 | API Key + Token | `{"type":"apiKeyToken","keyHeader":"X-Api-Key","tokenHeader":"X-Webhook-Token"}` | `{"apiKey":"…","token":"…"}` |
 
-Untuk Basic dan Bearer, Stalwart menyusun header Authorization. Untuk API Key dan API Key + Token, isi nama header dan nilai yang diharapkan receiver. Nilai rahasia hanya dapat ditulis. Pada PUT dengan URL dan jenis autentikasi yang sama, nilai rahasia yang dikosongkan mempertahankan nilai tersimpan. Jika URL atau jenis autentikasi berubah, isi kembali semua rahasia yang dibutuhkan.
+Untuk Basic dan Bearer, Stalwart menyusun header Authorization. Untuk API Key dan API Key + Token, isi nama header dan nilai yang diharapkan receiver. Nilai rahasia hanya dapat ditulis. Saat mengedit dengan URL dan jenis autentikasi yang sama, nilai rahasia yang dikosongkan mempertahankan nilai tersimpan. Jika URL atau jenis autentikasi berubah, isi kembali semua rahasia yang dibutuhkan.

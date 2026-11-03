@@ -6,11 +6,10 @@ info:
     that complement the JMAP API — most of the server's configuration and data
     is managed via JMAP (see `POST /jmap/`). The endpoints documented here cover
     interactive login, account introspection, configuration schema retrieval and
-    live (Server-Sent Events) telemetry streams, integrated applications, and per-recipient delivery status.
+    live (Server-Sent Events) telemetry streams, and per-recipient delivery status.
 
     For a local installation choose the localhost server below. Management requests use an
-    account credential (HTTP Basic) or an OAuth access token (Bearer). Integrated application
-    management requires a system administrator. Delivery status lookup instead requires both
+    account credential (HTTP Basic) or an OAuth access token (Bearer). Delivery status lookup requires both
     App-Key and App-Token headers. Webhook authentication is outbound and configured separately.
     POST and PUT requests with JSON require Content-Type: application/json.
   version: "1.0"
@@ -29,88 +28,7 @@ security:
   - bearerAuth: []
   - basicAuth: []
 paths:
-  /api/integrations/apps:
-    get:
-      summary: List integrated applications as a system administrator
-      description: Reads at most 10000 records and 16 MiB of stored data. Exceeding either bound fails the request without returning partial results.
-      responses:
-        '200':
-          description: Registered applications
-          content:
-            application/json:
-              schema: {type: array, items: {$ref: '#/components/schemas/IntegratedApp'}}
-    post:
-      summary: Generate an App-ID and register an integration as a system administrator
-      requestBody: {$ref: '#/components/requestBodies/IntegratedAppInput'}
-      responses:
-        '201':
-          description: Created application with its server-generated immutable App-ID and copyable app credentials
-          headers:
-            App-Key: {schema: {type: string}}
-            App-Token: {schema: {type: string}}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IntegratedApp'}
-  /api/integrations/apps/{appId}:
-    parameters:
-      - {$ref: '#/components/parameters/TrackingAppId'}
-    get:
-      summary: Read an application as a system administrator
-      responses:
-        '200':
-          description: Registered application
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/IntegratedApp'}
-        '404': {description: Unknown or inaccessible application}
-    put:
-      summary: Update the application name, callback URL or webhook authentication
-      requestBody: {$ref: '#/components/requestBodies/IntegratedAppInput'}
-      responses:
-        '204': {description: Updated}
-    delete:
-      summary: Delete an integration as a system administrator
-      responses:
-        '204': {description: Integration deleted.}
-  /api/integrations/apps/{appId}/credentials:
-    parameters:
-      - {$ref: '#/components/parameters/TrackingAppId'}
-    get:
-      summary: Retrieve the app credentials for copying as an authenticated system administrator
-      responses:
-        '200':
-          description: Credentials for the selected integration
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [appKey, appToken]
-                properties:
-                  appKey: {type: string}
-                  appToken: {type: string}
-  /api/integrations/apps/{appId}/credentials/regenerate:
-    parameters:
-      - {$ref: '#/components/parameters/TrackingAppId'}
-    post:
-      summary: Atomically replace both credentials for an integration as a system administrator
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, additionalProperties: false}
-      responses:
-        '200':
-          description: Generated pair. Subsequent requests must use both new values.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [appKey, appToken]
-                properties:
-                  appKey: {type: string}
-                  appToken: {type: string}
-        '409': {description: The integration changed during rotation}
-  /api/integrations/deliveries/{externalId}/status:
+  /api/deliveries/{externalId}/status:
     parameters:
       - {in: path, name: externalId, required: true, schema: {type: string, maxLength: 128}}
     get:
@@ -483,33 +401,6 @@ paths:
           description: Enterprise feature not available in this edition
 
 components:
-  parameters:
-    TrackingAppId:
-      in: path
-      name: appId
-      required: true
-      schema: {type: string, maxLength: 128}
-  requestBodies:
-    IntegratedAppInput:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [name, webhookUrl]
-            properties:
-              name: {type: string, minLength: 1, maxLength: 128}
-              webhookUrl: {type: string, format: uri, description: Public HTTPS callback URL}
-              webhookAuth: {$ref: '#/components/schemas/WebhookAuth'}
-              webhookSecrets:
-                type: object
-                writeOnly: true
-                additionalProperties: false
-                description: Supply password for Basic, token for Bearer, apiKey for API key, and both apiKey and token for API key plus token. On edits, omitted secrets are retained only for the same URL and authentication type.
-                properties:
-                  password: {type: string, format: password}
-                  apiKey: {type: string, format: password}
-                  token: {type: string, format: password}
   securitySchemes:
     integrationApiKey:
       type: apiKey
@@ -576,22 +467,6 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
 
   schemas:
-    WebhookAuth:
-      type: object
-      required: [type]
-      description: Defaults to none on creation. Basic requires username. API key modes require keyHeader, and apiKeyToken also requires a distinct tokenHeader.
-      properties:
-        type: {type: string, enum: [none, basic, bearer, apiKey, apiKeyToken]}
-        username: {type: string}
-        keyHeader: {type: string}
-        tokenHeader: {type: string}
-    IntegratedApp:
-      type: object
-      properties:
-        webhookAuth: {$ref: '#/components/schemas/WebhookAuth'}
-        appId: {type: string}
-        name: {type: string}
-        webhookUrl: {type: string, format: uri}
     AppDeliveryEvent:
       type: object
       required: [eventId, appId, externalId, queueId, recipient, status, updatedAt, details]

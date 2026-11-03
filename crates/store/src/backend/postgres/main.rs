@@ -168,26 +168,45 @@ async fn create_search_tables<T: SearchableField + PsqlSearchField + 'static>(
 
     conn.execute(&query, &[]).await.map_err(into_error)?;
 
-    // Create indexes
+    // Skip DDL for existing indexes. Even CREATE INDEX IF NOT EXISTS takes
+    // a table lock, which can queue writes behind a concurrent index build.
+    let existing = conn
+        .query(
+            "SELECT c.relname FROM pg_catalog.pg_index i \
+             JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid \
+             WHERE i.indrelid = pg_catalog.to_regclass($1)",
+            &[&table_name],
+        )
+        .await
+        .map_err(into_error)?
+        .into_iter()
+        .map(|row| row.get::<_, String>(0))
+        .collect::<AHashSet<_>>();
     for field in T::all_fields() {
         if field.is_text() || field.is_json() {
             let column_name = field.column();
-            let create_index_query = format!(
-                "CREATE INDEX IF NOT EXISTS gin_{table_name}_{column_name} ON {table_name} USING GIN({column_name})",
-            );
-            conn.execute(&create_index_query, &[])
-                .await
-                .map_err(into_error)?;
+            let index_name = format!("gin_{table_name}_{column_name}");
+            if !existing.contains(&index_name) {
+                let create_index_query = format!(
+                    "CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} USING GIN({column_name})",
+                );
+                conn.execute(&create_index_query, &[])
+                    .await
+                    .map_err(into_error)?;
+            }
         }
 
         if field.is_indexed() {
             let column_name = field.column();
-            let create_index_query = format!(
-                "CREATE INDEX IF NOT EXISTS idx_{table_name}_{column_name} ON {table_name}({column_name})",
-            );
-            conn.execute(&create_index_query, &[])
-                .await
-                .map_err(into_error)?;
+            let index_name = format!("idx_{table_name}_{column_name}");
+            if !existing.contains(&index_name) {
+                let create_index_query = format!(
+                    "CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}({column_name})",
+                );
+                conn.execute(&create_index_query, &[])
+                    .await
+                    .map_err(into_error)?;
+            }
         }
     }
 

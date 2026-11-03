@@ -16,14 +16,17 @@ mod integrations;
 use crate::{
     api::diagnose::{DeliveryStage, DeliveryTarget, spawn_delivery_diagnose},
     auth::{
-        authenticate::{Authenticator, HttpAuthenticated},
+        authenticate::{Authenticator, HttpAuthenticated, HttpHeaders},
         oauth::{auth::OAuthApiHandler, request_origin},
         permissions::AccountApiHandler,
     },
 };
 use common::{
     Server,
-    auth::{AccessToken, oauth::GrantType},
+    auth::{
+        AccessToken, RECOVERY_ADMIN_ID,
+        oauth::{GrantType, grant::RECOVERY_ADMIN_GRANT_ID},
+    },
     manager::application::Resource,
 };
 use groupware::calendar::itip::{ItipIngest, RsvpRequest};
@@ -38,7 +41,7 @@ use hyper::{
 };
 use jmap::api::{ToJmapHttpResponse, ToRequestError};
 use jmap_proto::error::request::RequestError;
-use registry::schema::enums::Permission;
+use registry::schema::enums::{OAuthClientKind, Permission};
 use std::time::Duration;
 use utils::url_params::UrlParams;
 
@@ -63,14 +66,82 @@ impl ManagementApi for Server {
         req: &mut HttpRequest,
         session: &HttpSessionData,
     ) -> trc::Result<HttpResponse> {
-        if req.uri().path().starts_with("/api/integrations/") {
-            let route = req
-                .uri()
-                .path()
-                .trim_start_matches("/api/integrations/")
-                .to_owned();
-            let path = route.split('/').collect::<Vec<_>>();
-            if path.first() == Some(&"deliveries") {
+        if let Some(route) = req.uri().path().strip_prefix("/api/integrations/") {
+            if route.split('/').next() != Some("apps") {
+                return Ok(HttpResponse::new(StatusCode::NOT_FOUND));
+            }
+            let Some((_, bearer)) = req
+                .authorization()
+                .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+            else {
+                return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+            };
+            let Some(origin) = integrations::apps_page_origin(
+                req.headers(),
+                request_origin(req, session).authority,
+            ) else {
+                return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+            };
+            let auth = self.authenticate_headers(req, session).await?;
+            let Some(grant_id) = auth.access_token.grant_id() else {
+                return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+            };
+            let apps = &self.inner.data.applications;
+            let is_ui = if grant_id == RECOVERY_ADMIN_GRANT_ID
+                && auth.access_token.account_id() == RECOVERY_ADMIN_ID
+            {
+                self.decode_access_token(Some(GrantType::AccessToken), bearer)?
+                    .claims
+                    .is_some_and(|client| {
+                        apps.is_admin_ui_client(&client, OAuthClientKind::FirstParty, &origin)
+                    })
+            } else {
+                self.oauth_grant(grant_id).await?.is_some_and(|stored| {
+                    stored.account_id() == auth.access_token.account_id()
+                        && apps.is_admin_ui_client(
+                            &stored.grant.client_id,
+                            stored.grant.client_kind,
+                            &origin,
+                        )
+                })
+            };
+            if !is_ui {
+                return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+            }
+            let path = route.to_owned();
+            let body = if matches!(*req.method(), Method::POST | Method::PUT) {
+                if req
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.split(';').next())
+                    != Some("application/json")
+                {
+                    return Ok(HttpResponse::new(StatusCode::UNSUPPORTED_MEDIA_TYPE));
+                }
+                fetch_body(req, 8192, session.session_id).await
+            } else {
+                None
+            };
+            return integrations::handle(
+                self,
+                auth.access_token,
+                &path.split('/').collect::<Vec<_>>(),
+                req.method(),
+                body.as_deref(),
+            )
+            .await;
+        }
+        let is_post = req.method() == Method::POST;
+        let body = if is_post {
+            fetch_body(req, 1024 * 1024, session.session_id).await
+        } else {
+            None
+        };
+        let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
+
+        match path.first().copied().unwrap_or_default() {
+            "deliveries" => {
                 let ["deliveries", external_id, "status"] = path.as_slice() else {
                     return Ok(HttpResponse::new(StatusCode::NOT_FOUND));
                 };
@@ -89,41 +160,8 @@ impl ManagementApi for Server {
                     .get("app-token")
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or_default();
-                return integrations::lookup(self, external_id, key, token).await;
+                integrations::lookup(self, external_id, key, token).await
             }
-            let auth = self.authenticate_headers(req, session).await?;
-            let body = if matches!(*req.method(), Method::POST | Method::PUT) {
-                if req
-                    .headers()
-                    .get(header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.split(';').next())
-                    != Some("application/json")
-                {
-                    return Ok(HttpResponse::new(StatusCode::UNSUPPORTED_MEDIA_TYPE));
-                }
-                fetch_body(req, 8192, session.session_id).await
-            } else {
-                None
-            };
-            return integrations::handle(
-                self,
-                auth.access_token,
-                &path,
-                req.method(),
-                body.as_deref(),
-            )
-            .await;
-        }
-        let is_post = req.method() == Method::POST;
-        let body = if is_post {
-            fetch_body(req, 1024 * 1024, session.session_id).await
-        } else {
-            None
-        };
-        let path = req.uri().path().split('/').skip(2).collect::<Vec<_>>();
-
-        match path.first().copied().unwrap_or_default() {
             "auth" if is_post => {
                 self.is_http_anonymous_request_allowed(session.remote_ip)
                     .await?;

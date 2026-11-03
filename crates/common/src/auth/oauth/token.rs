@@ -95,6 +95,7 @@ impl Server {
         account_id: u32,
         account_name: &str,
         grant_id: u64,
+        recovery_ui_client: Option<&str>,
         credential_version: u64,
     ) -> trc::Result<String> {
         let issued_at = seconds_since_oauth_epoch();
@@ -102,7 +103,7 @@ impl Server {
             &RawToken {
                 grant_type: GrantType::AccessToken,
                 account_id,
-                claims: None,
+                claims: recovery_ui_client.map(str::to_owned),
                 issued_at,
                 expiry: issued_at + self.core.oauth.oauth_expiry_token,
                 credential_version,

@@ -115,6 +115,32 @@ fn revoke_credentials(batch: &mut BatchBuilder, credentials: &AppCredentials) {
         .clear(index);
 }
 
+pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> Option<String> {
+    if headers.get("sec-fetch-site")?.to_str().ok()? != "same-origin" {
+        return None;
+    }
+    let page: hyper::Uri = headers
+        .get(hyper::header::REFERER)?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()?;
+    let scheme = page.scheme_str()?;
+    if !matches!(scheme, "http" | "https")
+        || !page.authority()?.as_str().eq_ignore_ascii_case(authority)
+        || page.path() != "/admin/Management/x:IntegrationApp"
+    {
+        return None;
+    }
+    let origin = format!("{scheme}://{}", page.authority()?);
+    if let Some(source) = headers.get(hyper::header::ORIGIN)
+        && source.to_str().ok()? != origin
+    {
+        return None;
+    }
+    Some(origin)
+}
+
 pub async fn lookup(
     server: &Server,
     external_id: &str,
@@ -282,6 +308,34 @@ mod tests {
     };
     use std::sync::Arc;
     use store::{RegistryStore, registry::bootstrap::Bootstrap};
+
+    #[test]
+    fn management_requires_same_origin_apps_page() {
+        use hyper::header::{HeaderMap, HeaderValue, ORIGIN, REFERER};
+        let mut headers = HeaderMap::new();
+        let host = "localhost:8080";
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static(
+                "http://localhost:8080/admin/Management/x:IntegrationApp?edit=1",
+            ),
+        );
+        assert!(apps_page_origin(&headers, host).is_none());
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        assert_eq!(
+            apps_page_origin(&headers, host).as_deref(),
+            Some("http://localhost:8080")
+        );
+        assert!(apps_page_origin(&headers, "elsewhere.example").is_none());
+        headers.insert(ORIGIN, HeaderValue::from_static("http://elsewhere.example"));
+        assert!(apps_page_origin(&headers, host).is_none());
+        headers.remove(ORIGIN);
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("http://localhost:8080/admin/Management/x:Role"),
+        );
+        assert!(apps_page_origin(&headers, host).is_none());
+    }
 
     #[test]
     fn webhook_auth_headers_and_write_only_secrets() {
