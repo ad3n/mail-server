@@ -47,7 +47,7 @@ export default function AdminPanel() {
 
   const schema = useSchemaStore((s) => s.schema);
 
-  const { viewName, id } = parseAdminRoute(splat, (name) => name === 'x:IntegrationApp' || (!!schema && resolveObject(schema, name) !== null));
+  const { viewName, id } = parseAdminRoute(splat, (name) => name === 'x:App' || (!!schema && resolveObject(schema, name) !== null));
 
   const edition = useAccountStore((s) => s.edition);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);

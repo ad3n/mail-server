@@ -318,7 +318,7 @@ export async function fetchSchema(signal?: AbortSignal): Promise<Schema> {
     const items = directory.container.items;
     const oauth = items.findIndex(item => item.type === 'link' && item.viewName === 'x:OAuthClient');
     items.splice(oauth < 0 ? items.length : oauth + 1, 0, {
-      type: 'link', name: 'Apps', viewName: 'x:IntegrationApp',
+      type: 'link', name: 'Apps', viewName: 'x:App',
     });
   }
   return schema;

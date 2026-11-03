@@ -11,7 +11,7 @@ Impor `openapi.yml` ke Postman atau Swagger UI. Pilih server `http://localhost:8
 
 ## Administrasi aplikasi
 
-Admin sistem mengelola aplikasi, webhook, serta kredensial melalui **Management → Directory → Apps** di `/admin/Management/x:IntegrationApp`.
+Admin sistem mengelola aplikasi, webhook, serta kredensial melalui **Management → Directory → Apps** di `/admin/Management/x:App`.
 
 ## Pengiriman dan lookup
 

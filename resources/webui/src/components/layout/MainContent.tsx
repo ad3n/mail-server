@@ -92,7 +92,7 @@ function renderView(
   }
   // SPDX-SnippetEnd
 
-  if (viewName === 'x:IntegrationApp' && permissions.hasPermission('sysSystemSettingsUpdate')) {
+  if (viewName === 'x:App' && permissions.hasPermission('sysSystemSettingsUpdate')) {
     return <IntegrationApps id={id} />;
   }
 

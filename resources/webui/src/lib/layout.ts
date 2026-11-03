@@ -48,7 +48,7 @@ function checkSpecialLink(
   hasPerm?: HasPermission,
   canGet?: CanGet,
 ): SpecialLinkInfo | null {
-  if (viewName === 'x:IntegrationApp') {
+  if (viewName === 'x:App') {
     return { visible: hasPerm?.('sysSystemSettingsUpdate') ?? true, enterprise: false };
   }
   const component = customComponentName(viewName);

@@ -126,9 +126,7 @@ pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> O
         .parse()
         .ok()?;
     let scheme = page.scheme_str()?;
-    let path = page
-        .path()
-        .strip_prefix("/admin/Management/x:IntegrationApp")?;
+    let path = page.path().strip_prefix("/admin/Management/x:App")?;
     if !matches!(scheme, "http" | "https")
         || !page.authority()?.as_str().eq_ignore_ascii_case(authority)
         || !(path.is_empty() || path.strip_prefix('/').is_some_and(valid_id))
@@ -319,9 +317,7 @@ mod tests {
         let host = "localhost:8080";
         headers.insert(
             REFERER,
-            HeaderValue::from_static(
-                "http://localhost:8080/admin/Management/x:IntegrationApp?edit=1",
-            ),
+            HeaderValue::from_static("http://localhost:8080/admin/Management/x:App?edit=1"),
         );
         assert!(apps_page_origin(&headers, host).is_none());
         headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
@@ -332,7 +328,7 @@ mod tests {
         for path in ["/new", "/app-123"] {
             headers.insert(
                 REFERER,
-                format!("http://localhost:8080/admin/Management/x:IntegrationApp{path}")
+                format!("http://localhost:8080/admin/Management/x:App{path}")
                     .parse()
                     .unwrap(),
             );
@@ -341,7 +337,7 @@ mod tests {
         for path in ["Extra", "/id/more", "/.."] {
             headers.insert(
                 REFERER,
-                format!("http://localhost:8080/admin/Management/x:IntegrationApp{path}")
+                format!("http://localhost:8080/admin/Management/x:App{path}")
                     .parse()
                     .unwrap(),
             );
@@ -349,7 +345,7 @@ mod tests {
         }
         headers.insert(
             REFERER,
-            HeaderValue::from_static("http://localhost:8080/admin/Management/x:IntegrationApp/new"),
+            HeaderValue::from_static("http://localhost:8080/admin/Management/x:App/new"),
         );
         assert!(apps_page_origin(&headers, "elsewhere.example").is_none());
         headers.insert(ORIGIN, HeaderValue::from_static("http://elsewhere.example"));

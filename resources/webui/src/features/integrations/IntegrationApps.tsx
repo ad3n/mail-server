@@ -55,7 +55,7 @@ interface Credentials {
   appKey: string;
   appToken: string;
 }
-const listPath = '/Management/x:IntegrationApp';
+const listPath = '/Management/x:App';
 const endpoint = '/api/integrations/apps';
 const columns = [
   { name: 'name', label: 'Name' },
