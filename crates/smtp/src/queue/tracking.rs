@@ -6,7 +6,7 @@ use common::config::smtp::queue::QueueName;
 use common::delivery_tracking::{
     DeliveryEvent, DeliveryEventData, callback_key, class, encode, result_prefix,
 };
-use store::write::{BatchBuilder, now};
+use store::write::{BatchBuilder, ValueClass, now};
 
 #[derive(
     Debug,
@@ -59,9 +59,22 @@ impl MessageWrapper {
         removing: bool,
         queue: Option<QueueName>,
     ) -> trc::Result<()> {
+        for (class, value) in self.tracking_records(server, removing, queue)? {
+            batch.set(class, value);
+        }
+        Ok(())
+    }
+
+    pub(super) fn tracking_records(
+        &self,
+        server: &Server,
+        removing: bool,
+        queue: Option<QueueName>,
+    ) -> trc::Result<Vec<(ValueClass, Vec<u8>)>> {
         let Some(t) = self.message.tracking() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
+        let mut records = Vec::new();
         let timestamp = now();
         for (i, rcpt) in self.message.recipients.iter().enumerate() {
             let mut status = label(&rcpt.status);
@@ -95,13 +108,13 @@ impl MessageWrapper {
                 self.queue_id
             );
             let encoded = encode(&event)?;
-            batch.set(class(&result), encoded.clone());
-            batch.set(
+            records.push((class(&result), encoded.clone()));
+            records.push((
                 class(&callback_key(timestamp, &event.delivery.event_id)),
                 encoded,
-            );
+            ));
         }
-        Ok(())
+        Ok(records)
     }
 }
 

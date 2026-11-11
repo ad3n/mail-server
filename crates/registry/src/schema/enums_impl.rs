@@ -1287,7 +1287,6 @@ impl EnumImpl for BlobSwapStoreType {
             b"Default" => BlobSwapStoreType::Default,
             b"S3" => BlobSwapStoreType::S3,
             b"Azure" => BlobSwapStoreType::Azure,
-            b"FileSystem" => BlobSwapStoreType::FileSystem,
             b"FoundationDb" => BlobSwapStoreType::FoundationDb,
             b"PostgreSql" => BlobSwapStoreType::PostgreSql,
             b"MySql" => BlobSwapStoreType::MySql,
@@ -1300,7 +1299,6 @@ impl EnumImpl for BlobSwapStoreType {
             BlobSwapStoreType::Default => "Default",
             BlobSwapStoreType::S3 => "S3",
             BlobSwapStoreType::Azure => "Azure",
-            BlobSwapStoreType::FileSystem => "FileSystem",
             BlobSwapStoreType::FoundationDb => "FoundationDb",
             BlobSwapStoreType::PostgreSql => "PostgreSql",
             BlobSwapStoreType::MySql => "MySql",
@@ -1316,10 +1314,10 @@ impl EnumImpl for BlobSwapStoreType {
             0 => Some(BlobSwapStoreType::Default),
             1 => Some(BlobSwapStoreType::S3),
             2 => Some(BlobSwapStoreType::Azure),
-            3 => Some(BlobSwapStoreType::FileSystem),
             4 => Some(BlobSwapStoreType::FoundationDb),
             5 => Some(BlobSwapStoreType::PostgreSql),
             6 => Some(BlobSwapStoreType::MySql),
+            3 => Some(BlobSwapStoreType::Default),
             _ => None,
         }
     }
@@ -1417,7 +1415,7 @@ impl EnumImpl for CacheSwapType {
             CacheSwapType,
             b"Disabled" => CacheSwapType::Disabled,
             b"LocalFile" => CacheSwapType::LocalFile,
-            b"Redis" => CacheSwapType::Redis,
+            b"InMemory" => CacheSwapType::InMemory,
             b"BlobStore" => CacheSwapType::BlobStore,
         }
         .copied()
@@ -1427,7 +1425,7 @@ impl EnumImpl for CacheSwapType {
         match self {
             CacheSwapType::Disabled => "Disabled",
             CacheSwapType::LocalFile => "LocalFile",
-            CacheSwapType::Redis => "Redis",
+            CacheSwapType::InMemory => "InMemory",
             CacheSwapType::BlobStore => "BlobStore",
         }
     }
@@ -1440,7 +1438,7 @@ impl EnumImpl for CacheSwapType {
         match id {
             0 => Some(CacheSwapType::Disabled),
             1 => Some(CacheSwapType::LocalFile),
-            2 => Some(CacheSwapType::Redis),
+            2 => Some(CacheSwapType::InMemory),
             3 => Some(CacheSwapType::BlobStore),
             _ => None,
         }
@@ -1829,6 +1827,7 @@ impl EnumImpl for CompressionAlgo {
             CompressionAlgo,
             b"lz4" => CompressionAlgo::Lz4,
             b"none" => CompressionAlgo::None,
+            b"zstd" => CompressionAlgo::Zstd,
         }
         .copied()
     }
@@ -1837,6 +1836,7 @@ impl EnumImpl for CompressionAlgo {
         match self {
             CompressionAlgo::Lz4 => "lz4",
             CompressionAlgo::None => "none",
+            CompressionAlgo::Zstd => "zstd",
         }
     }
 
@@ -1848,11 +1848,12 @@ impl EnumImpl for CompressionAlgo {
         match id {
             0 => Some(CompressionAlgo::Lz4),
             1 => Some(CompressionAlgo::None),
+            2 => Some(CompressionAlgo::Zstd),
             _ => None,
         }
     }
 
-    const COUNT: usize = 2;
+    const COUNT: usize = 3;
 }
 
 impl serde::Serialize for CompressionAlgo {
@@ -1887,6 +1888,7 @@ impl EnumImpl for CoordinatorType {
             b"Redis" => CoordinatorType::Redis,
             b"RedisCluster" => CoordinatorType::RedisCluster,
             b"RedisSentinel" => CoordinatorType::RedisSentinel,
+            b"Keep" => CoordinatorType::Keep,
         }
         .copied()
     }
@@ -1901,6 +1903,7 @@ impl EnumImpl for CoordinatorType {
             CoordinatorType::Redis => "Redis",
             CoordinatorType::RedisCluster => "RedisCluster",
             CoordinatorType::RedisSentinel => "RedisSentinel",
+            CoordinatorType::Keep => "Keep",
         }
     }
 
@@ -1918,11 +1921,12 @@ impl EnumImpl for CoordinatorType {
             5 => Some(CoordinatorType::Redis),
             6 => Some(CoordinatorType::RedisCluster),
             7 => Some(CoordinatorType::RedisSentinel),
+            8 => Some(CoordinatorType::Keep),
             _ => None,
         }
     }
 
-    const COUNT: usize = 8;
+    const COUNT: usize = 9;
 }
 
 impl serde::Serialize for CoordinatorType {
@@ -2007,6 +2011,7 @@ impl EnumImpl for CredentialType {
             b"Password" => CredentialType::Password,
             b"AppPassword" => CredentialType::AppPassword,
             b"ApiKey" => CredentialType::ApiKey,
+            b"Passkey" => CredentialType::Passkey,
         }
         .copied()
     }
@@ -2016,6 +2021,7 @@ impl EnumImpl for CredentialType {
             CredentialType::Password => "Password",
             CredentialType::AppPassword => "AppPassword",
             CredentialType::ApiKey => "ApiKey",
+            CredentialType::Passkey => "Passkey",
         }
     }
 
@@ -2028,11 +2034,12 @@ impl EnumImpl for CredentialType {
             0 => Some(CredentialType::Password),
             1 => Some(CredentialType::AppPassword),
             2 => Some(CredentialType::ApiKey),
+            3 => Some(CredentialType::Passkey),
             _ => None,
         }
     }
 
-    const COUNT: usize = 3;
+    const COUNT: usize = 4;
 }
 
 impl serde::Serialize for CredentialType {
@@ -4945,6 +4952,7 @@ impl EnumImpl for InMemoryStoreType {
             b"Redis" => InMemoryStoreType::Redis,
             b"RedisCluster" => InMemoryStoreType::RedisCluster,
             b"RedisSentinel" => InMemoryStoreType::RedisSentinel,
+            b"Keep" => InMemoryStoreType::Keep,
         }
         .copied()
     }
@@ -4959,6 +4967,7 @@ impl EnumImpl for InMemoryStoreType {
             b"Redis" => InMemoryStoreType::Redis,
             b"RedisCluster" => InMemoryStoreType::RedisCluster,
             b"RedisSentinel" => InMemoryStoreType::RedisSentinel,
+            b"Keep" => InMemoryStoreType::Keep,
         }
         .copied()
     }
@@ -4975,6 +4984,7 @@ impl EnumImpl for InMemoryStoreType {
             InMemoryStoreType::Redis => "Redis",
             InMemoryStoreType::RedisCluster => "RedisCluster",
             InMemoryStoreType::RedisSentinel => "RedisSentinel",
+            InMemoryStoreType::Keep => "Keep",
         }
     }
 
@@ -4994,11 +5004,12 @@ impl EnumImpl for InMemoryStoreType {
             2 => Some(InMemoryStoreType::Redis),
             3 => Some(InMemoryStoreType::RedisCluster),
             4 => Some(InMemoryStoreType::RedisSentinel),
+            5 => Some(InMemoryStoreType::Keep),
             _ => None,
         }
     }
 
-    const COUNT: usize = 5;
+    const COUNT: usize = 6;
 }
 
 impl serde::Serialize for InMemoryStoreType {
@@ -5011,6 +5022,67 @@ impl serde::Serialize for InMemoryStoreType {
 }
 
 impl<'de> serde::Deserialize<'de> for InMemoryStoreType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for InMemorySwapStoreType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            InMemorySwapStoreType,
+            b"Default" => InMemorySwapStoreType::Default,
+            b"Redis" => InMemorySwapStoreType::Redis,
+            b"RedisCluster" => InMemorySwapStoreType::RedisCluster,
+            b"RedisSentinel" => InMemorySwapStoreType::RedisSentinel,
+            b"Keep" => InMemorySwapStoreType::Keep,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            InMemorySwapStoreType::Default => "Default",
+            InMemorySwapStoreType::Redis => "Redis",
+            InMemorySwapStoreType::RedisCluster => "RedisCluster",
+            InMemorySwapStoreType::RedisSentinel => "RedisSentinel",
+            InMemorySwapStoreType::Keep => "Keep",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(InMemorySwapStoreType::Default),
+            1 => Some(InMemorySwapStoreType::Redis),
+            2 => Some(InMemorySwapStoreType::RedisCluster),
+            3 => Some(InMemorySwapStoreType::RedisSentinel),
+            4 => Some(InMemorySwapStoreType::Keep),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 5;
+}
+
+impl serde::Serialize for InMemorySwapStoreType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for InMemorySwapStoreType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -5335,6 +5407,113 @@ impl serde::Serialize for JwtSignatureAlgorithm {
 }
 
 impl<'de> serde::Deserialize<'de> for JwtSignatureAlgorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for KeepStreamMode {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            KeepStreamMode,
+            b"everywhere" => KeepStreamMode::Everywhere,
+            b"owner" => KeepStreamMode::Owner,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            KeepStreamMode::Everywhere => "everywhere",
+            KeepStreamMode::Owner => "owner",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(KeepStreamMode::Everywhere),
+            1 => Some(KeepStreamMode::Owner),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for KeepStreamMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeepStreamMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for KeepTlsType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            KeepTlsType,
+            b"Disabled" => KeepTlsType::Disabled,
+            b"RawPublicKeys" => KeepTlsType::RawPublicKeys,
+            b"Authority" => KeepTlsType::Authority,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            KeepTlsType::Disabled => "Disabled",
+            KeepTlsType::RawPublicKeys => "RawPublicKeys",
+            KeepTlsType::Authority => "Authority",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(KeepTlsType::Disabled),
+            1 => Some(KeepTlsType::RawPublicKeys),
+            2 => Some(KeepTlsType::Authority),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for KeepTlsType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeepTlsType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -6610,6 +6789,7 @@ impl EnumImpl for LookupStoreType {
             b"Redis" => LookupStoreType::Redis,
             b"RedisCluster" => LookupStoreType::RedisCluster,
             b"RedisSentinel" => LookupStoreType::RedisSentinel,
+            b"Keep" => LookupStoreType::Keep,
         }
         .copied()
     }
@@ -6626,6 +6806,7 @@ impl EnumImpl for LookupStoreType {
             b"Redis" => LookupStoreType::Redis,
             b"RedisCluster" => LookupStoreType::RedisCluster,
             b"RedisSentinel" => LookupStoreType::RedisSentinel,
+            b"Keep" => LookupStoreType::Keep,
         }
         .copied()
     }
@@ -6644,6 +6825,7 @@ impl EnumImpl for LookupStoreType {
             LookupStoreType::Redis => "Redis",
             LookupStoreType::RedisCluster => "RedisCluster",
             LookupStoreType::RedisSentinel => "RedisSentinel",
+            LookupStoreType::Keep => "Keep",
         }
     }
 
@@ -6665,11 +6847,12 @@ impl EnumImpl for LookupStoreType {
             4 => Some(LookupStoreType::Redis),
             5 => Some(LookupStoreType::RedisCluster),
             6 => Some(LookupStoreType::RedisSentinel),
+            7 => Some(LookupStoreType::Keep),
             _ => None,
         }
     }
 
-    const COUNT: usize = 7;
+    const COUNT: usize = 8;
 }
 
 impl serde::Serialize for LookupStoreType {
@@ -8023,6 +8206,9 @@ impl EnumImpl for OAuthScope {
             b"contacts" => OAuthScope::Contacts,
             b"calendars" => OAuthScope::Calendars,
             b"files" => OAuthScope::Files,
+            b"full" => OAuthScope::Full,
+            b"security" => OAuthScope::Security,
+            b"settings" => OAuthScope::Settings,
         }
         .copied()
     }
@@ -8033,6 +8219,9 @@ impl EnumImpl for OAuthScope {
             OAuthScope::Contacts => "contacts",
             OAuthScope::Calendars => "calendars",
             OAuthScope::Files => "files",
+            OAuthScope::Full => "full",
+            OAuthScope::Security => "security",
+            OAuthScope::Settings => "settings",
         }
     }
 
@@ -8046,11 +8235,14 @@ impl EnumImpl for OAuthScope {
             1 => Some(OAuthScope::Contacts),
             2 => Some(OAuthScope::Calendars),
             3 => Some(OAuthScope::Files),
+            4 => Some(OAuthScope::Full),
+            5 => Some(OAuthScope::Security),
+            6 => Some(OAuthScope::Settings),
             _ => None,
         }
     }
 
-    const COUNT: usize = 4;
+    const COUNT: usize = 7;
 }
 
 impl serde::Serialize for OAuthScope {
@@ -8292,6 +8484,61 @@ impl serde::Serialize for OvhEndpoint {
 }
 
 impl<'de> serde::Deserialize<'de> for OvhEndpoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for PasskeyAlgorithm {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            PasskeyAlgorithm,
+            b"es256" => PasskeyAlgorithm::Es256,
+            b"ed25519" => PasskeyAlgorithm::Ed25519,
+            b"rs256" => PasskeyAlgorithm::Rs256,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PasskeyAlgorithm::Es256 => "es256",
+            PasskeyAlgorithm::Ed25519 => "ed25519",
+            PasskeyAlgorithm::Rs256 => "rs256",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PasskeyAlgorithm::Es256),
+            1 => Some(PasskeyAlgorithm::Ed25519),
+            2 => Some(PasskeyAlgorithm::Rs256),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for PasskeyAlgorithm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PasskeyAlgorithm {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -8941,6 +9188,11 @@ impl EnumImpl for Permission {
             b"sysOAuthGrantQuery" => Permission::SysOAuthGrantQuery,
             b"sysOidcProviderGet" => Permission::SysOidcProviderGet,
             b"sysOidcProviderUpdate" => Permission::SysOidcProviderUpdate,
+            b"sysPasskeyGet" => Permission::SysPasskeyGet,
+            b"sysPasskeyCreate" => Permission::SysPasskeyCreate,
+            b"sysPasskeyUpdate" => Permission::SysPasskeyUpdate,
+            b"sysPasskeyDestroy" => Permission::SysPasskeyDestroy,
+            b"sysPasskeyQuery" => Permission::SysPasskeyQuery,
             b"sysPublicKeyGet" => Permission::SysPublicKeyGet,
             b"sysPublicKeyCreate" => Permission::SysPublicKeyCreate,
             b"sysPublicKeyUpdate" => Permission::SysPublicKeyUpdate,
@@ -9027,6 +9279,11 @@ impl EnumImpl for Permission {
             b"sysStoreLookupUpdate" => Permission::SysStoreLookupUpdate,
             b"sysStoreLookupDestroy" => Permission::SysStoreLookupDestroy,
             b"sysStoreLookupQuery" => Permission::SysStoreLookupQuery,
+            b"sysSymmetricKeyGet" => Permission::SysSymmetricKeyGet,
+            b"sysSymmetricKeyCreate" => Permission::SysSymmetricKeyCreate,
+            b"sysSymmetricKeyUpdate" => Permission::SysSymmetricKeyUpdate,
+            b"sysSymmetricKeyDestroy" => Permission::SysSymmetricKeyDestroy,
+            b"sysSymmetricKeyQuery" => Permission::SysSymmetricKeyQuery,
             b"sysSystemSettingsGet" => Permission::SysSystemSettingsGet,
             b"sysSystemSettingsUpdate" => Permission::SysSystemSettingsUpdate,
             b"taskCalendarAlarmEmail" => Permission::TaskCalendarAlarmEmail,
@@ -9048,6 +9305,7 @@ impl EnumImpl for Permission {
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
             b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
+            b"taskBlobRecode" => Permission::TaskBlobRecode,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -9578,6 +9836,11 @@ impl EnumImpl for Permission {
             b"sysOAuthGrantQuery" => Permission::SysOAuthGrantQuery,
             b"sysOidcProviderGet" => Permission::SysOidcProviderGet,
             b"sysOidcProviderUpdate" => Permission::SysOidcProviderUpdate,
+            b"sysPasskeyGet" => Permission::SysPasskeyGet,
+            b"sysPasskeyCreate" => Permission::SysPasskeyCreate,
+            b"sysPasskeyUpdate" => Permission::SysPasskeyUpdate,
+            b"sysPasskeyDestroy" => Permission::SysPasskeyDestroy,
+            b"sysPasskeyQuery" => Permission::SysPasskeyQuery,
             b"sysPublicKeyGet" => Permission::SysPublicKeyGet,
             b"sysPublicKeyCreate" => Permission::SysPublicKeyCreate,
             b"sysPublicKeyUpdate" => Permission::SysPublicKeyUpdate,
@@ -9662,6 +9925,11 @@ impl EnumImpl for Permission {
             b"sysStoreLookupUpdate" => Permission::SysStoreLookupUpdate,
             b"sysStoreLookupDestroy" => Permission::SysStoreLookupDestroy,
             b"sysStoreLookupQuery" => Permission::SysStoreLookupQuery,
+            b"sysSymmetricKeyGet" => Permission::SysSymmetricKeyGet,
+            b"sysSymmetricKeyCreate" => Permission::SysSymmetricKeyCreate,
+            b"sysSymmetricKeyUpdate" => Permission::SysSymmetricKeyUpdate,
+            b"sysSymmetricKeyDestroy" => Permission::SysSymmetricKeyDestroy,
+            b"sysSymmetricKeyQuery" => Permission::SysSymmetricKeyQuery,
             b"sysSystemSettingsGet" => Permission::SysSystemSettingsGet,
             b"sysSystemSettingsUpdate" => Permission::SysSystemSettingsUpdate,
             b"taskCalendarAlarmEmail" => Permission::TaskCalendarAlarmEmail,
@@ -9681,6 +9949,7 @@ impl EnumImpl for Permission {
             b"taskDmarcReportWindow" => Permission::TaskDmarcReportWindow,
             b"taskTlsReportWindow" => Permission::TaskTlsReportWindow,
             b"taskExternalPublicKeyMaintenance" => Permission::TaskExternalPublicKeyMaintenance,
+            b"taskBlobRecode" => Permission::TaskBlobRecode,
             b"sysTaskGet" => Permission::SysTaskGet,
             b"sysTaskCreate" => Permission::SysTaskCreate,
             b"sysTaskUpdate" => Permission::SysTaskUpdate,
@@ -10302,6 +10571,11 @@ impl EnumImpl for Permission {
             Permission::SysOAuthGrantQuery => "sysOAuthGrantQuery",
             Permission::SysOidcProviderGet => "sysOidcProviderGet",
             Permission::SysOidcProviderUpdate => "sysOidcProviderUpdate",
+            Permission::SysPasskeyGet => "sysPasskeyGet",
+            Permission::SysPasskeyCreate => "sysPasskeyCreate",
+            Permission::SysPasskeyUpdate => "sysPasskeyUpdate",
+            Permission::SysPasskeyDestroy => "sysPasskeyDestroy",
+            Permission::SysPasskeyQuery => "sysPasskeyQuery",
             Permission::SysPublicKeyGet => "sysPublicKeyGet",
             Permission::SysPublicKeyCreate => "sysPublicKeyCreate",
             Permission::SysPublicKeyUpdate => "sysPublicKeyUpdate",
@@ -10394,6 +10668,11 @@ impl EnumImpl for Permission {
             Permission::SysStoreLookupUpdate => "sysStoreLookupUpdate",
             Permission::SysStoreLookupDestroy => "sysStoreLookupDestroy",
             Permission::SysStoreLookupQuery => "sysStoreLookupQuery",
+            Permission::SysSymmetricKeyGet => "sysSymmetricKeyGet",
+            Permission::SysSymmetricKeyCreate => "sysSymmetricKeyCreate",
+            Permission::SysSymmetricKeyUpdate => "sysSymmetricKeyUpdate",
+            Permission::SysSymmetricKeyDestroy => "sysSymmetricKeyDestroy",
+            Permission::SysSymmetricKeyQuery => "sysSymmetricKeyQuery",
             Permission::SysSystemSettingsGet => "sysSystemSettingsGet",
             Permission::SysSystemSettingsUpdate => "sysSystemSettingsUpdate",
             Permission::TaskCalendarAlarmEmail => "taskCalendarAlarmEmail",
@@ -10425,6 +10704,7 @@ impl EnumImpl for Permission {
             Permission::TaskDmarcReportWindow => "taskDmarcReportWindow",
             Permission::TaskTlsReportWindow => "taskTlsReportWindow",
             Permission::TaskExternalPublicKeyMaintenance => "taskExternalPublicKeyMaintenance",
+            Permission::TaskBlobRecode => "taskBlobRecode",
             Permission::SysTaskGet => "sysTaskGet",
             Permission::SysTaskCreate => "sysTaskCreate",
             Permission::SysTaskUpdate => "sysTaskUpdate",
@@ -11069,6 +11349,11 @@ impl EnumImpl for Permission {
             502 => Some(Permission::SysOAuthGrantQuery),
             503 => Some(Permission::SysOidcProviderGet),
             504 => Some(Permission::SysOidcProviderUpdate),
+            662 => Some(Permission::SysPasskeyGet),
+            663 => Some(Permission::SysPasskeyCreate),
+            664 => Some(Permission::SysPasskeyUpdate),
+            665 => Some(Permission::SysPasskeyDestroy),
+            666 => Some(Permission::SysPasskeyQuery),
             505 => Some(Permission::SysPublicKeyGet),
             506 => Some(Permission::SysPublicKeyCreate),
             507 => Some(Permission::SysPublicKeyUpdate),
@@ -11161,6 +11446,11 @@ impl EnumImpl for Permission {
             583 => Some(Permission::SysStoreLookupUpdate),
             584 => Some(Permission::SysStoreLookupDestroy),
             585 => Some(Permission::SysStoreLookupQuery),
+            656 => Some(Permission::SysSymmetricKeyGet),
+            657 => Some(Permission::SysSymmetricKeyCreate),
+            658 => Some(Permission::SysSymmetricKeyUpdate),
+            659 => Some(Permission::SysSymmetricKeyDestroy),
+            660 => Some(Permission::SysSymmetricKeyQuery),
             586 => Some(Permission::SysSystemSettingsGet),
             587 => Some(Permission::SysSystemSettingsUpdate),
             588 => Some(Permission::TaskCalendarAlarmEmail),
@@ -11192,6 +11482,7 @@ impl EnumImpl for Permission {
             604 => Some(Permission::TaskDmarcReportWindow),
             605 => Some(Permission::TaskTlsReportWindow),
             655 => Some(Permission::TaskExternalPublicKeyMaintenance),
+            661 => Some(Permission::TaskBlobRecode),
             606 => Some(Permission::SysTaskGet),
             607 => Some(Permission::SysTaskCreate),
             608 => Some(Permission::SysTaskUpdate),
@@ -11254,7 +11545,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 656;
+    const COUNT: usize = 667;
 }
 
 impl Permission {
@@ -12017,6 +12308,17 @@ impl Permission {
         Permission::SysSmimeTrustAnchorDestroy,
         Permission::SysSmimeTrustAnchorQuery,
         Permission::TaskExternalPublicKeyMaintenance,
+        Permission::SysSymmetricKeyGet,
+        Permission::SysSymmetricKeyCreate,
+        Permission::SysSymmetricKeyUpdate,
+        Permission::SysSymmetricKeyDestroy,
+        Permission::SysSymmetricKeyQuery,
+        Permission::TaskBlobRecode,
+        Permission::SysPasskeyGet,
+        Permission::SysPasskeyCreate,
+        Permission::SysPasskeyUpdate,
+        Permission::SysPasskeyDestroy,
+        Permission::SysPasskeyQuery,
     ];
 }
 
@@ -12760,64 +13062,6 @@ impl serde::Serialize for RedisProtocol {
 }
 
 impl<'de> serde::Deserialize<'de> for RedisProtocol {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = Cow::<str>::deserialize(deserializer)?;
-        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
-    }
-}
-
-impl EnumImpl for RedisSwapStoreType {
-    fn parse(value: &str) -> Option<Self> {
-        hashify::map! {
-            value.as_bytes(),
-            RedisSwapStoreType,
-            b"Default" => RedisSwapStoreType::Default,
-            b"Redis" => RedisSwapStoreType::Redis,
-            b"RedisCluster" => RedisSwapStoreType::RedisCluster,
-            b"RedisSentinel" => RedisSwapStoreType::RedisSentinel,
-        }
-        .copied()
-    }
-
-    fn as_str(&self) -> &'static str {
-        match self {
-            RedisSwapStoreType::Default => "Default",
-            RedisSwapStoreType::Redis => "Redis",
-            RedisSwapStoreType::RedisCluster => "RedisCluster",
-            RedisSwapStoreType::RedisSentinel => "RedisSentinel",
-        }
-    }
-
-    fn to_id(&self) -> u16 {
-        *self as u16
-    }
-
-    fn from_id(id: u16) -> Option<Self> {
-        match id {
-            0 => Some(RedisSwapStoreType::Default),
-            1 => Some(RedisSwapStoreType::Redis),
-            2 => Some(RedisSwapStoreType::RedisCluster),
-            3 => Some(RedisSwapStoreType::RedisSentinel),
-            _ => None,
-        }
-    }
-
-    const COUNT: usize = 4;
-}
-
-impl serde::Serialize for RedisSwapStoreType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for RedisSwapStoreType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -14971,6 +15215,7 @@ impl EnumImpl for StorageQuota {
             b"maxApiKeys" => StorageQuota::MaxApiKeys,
             b"maxPublicKeys" => StorageQuota::MaxPublicKeys,
             b"maxDiskQuota" => StorageQuota::MaxDiskQuota,
+            b"maxPasskeys" => StorageQuota::MaxPasskeys,
         }
         .copied()
     }
@@ -14999,6 +15244,7 @@ impl EnumImpl for StorageQuota {
             b"maxApiKeys" => StorageQuota::MaxApiKeys,
             b"maxPublicKeys" => StorageQuota::MaxPublicKeys,
             b"maxDiskQuota" => StorageQuota::MaxDiskQuota,
+            b"maxPasskeys" => StorageQuota::MaxPasskeys,
         }
         .copied()
     }
@@ -15029,6 +15275,7 @@ impl EnumImpl for StorageQuota {
             StorageQuota::MaxApiKeys => "maxApiKeys",
             StorageQuota::MaxPublicKeys => "maxPublicKeys",
             StorageQuota::MaxDiskQuota => "maxDiskQuota",
+            StorageQuota::MaxPasskeys => "maxPasskeys",
         }
     }
 
@@ -15062,11 +15309,12 @@ impl EnumImpl for StorageQuota {
             16 => Some(StorageQuota::MaxApiKeys),
             17 => Some(StorageQuota::MaxPublicKeys),
             18 => Some(StorageQuota::MaxDiskQuota),
+            19 => Some(StorageQuota::MaxPasskeys),
             _ => None,
         }
     }
 
-    const COUNT: usize = 19;
+    const COUNT: usize = 20;
 }
 
 impl serde::Serialize for StorageQuota {
@@ -15143,6 +15391,58 @@ impl<'de> serde::Deserialize<'de> for SubAddressingType {
     }
 }
 
+impl EnumImpl for SymmetricCipher {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            SymmetricCipher,
+            b"aes256Gcm" => SymmetricCipher::Aes256Gcm,
+            b"chacha20Poly1305" => SymmetricCipher::Chacha20Poly1305,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            SymmetricCipher::Aes256Gcm => "aes256Gcm",
+            SymmetricCipher::Chacha20Poly1305 => "chacha20Poly1305",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(SymmetricCipher::Aes256Gcm),
+            1 => Some(SymmetricCipher::Chacha20Poly1305),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for SymmetricCipher {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SymmetricCipher {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for TaskAccountMaintenanceType {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -15195,6 +15495,119 @@ impl serde::Serialize for TaskAccountMaintenanceType {
 }
 
 impl<'de> serde::Deserialize<'de> for TaskAccountMaintenanceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for TaskBlobRecodeCompression {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            TaskBlobRecodeCompression,
+            b"keep" => TaskBlobRecodeCompression::Keep,
+            b"disable" => TaskBlobRecodeCompression::Disable,
+            b"lz4" => TaskBlobRecodeCompression::Lz4,
+            b"zstd" => TaskBlobRecodeCompression::Zstd,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            TaskBlobRecodeCompression::Keep => "keep",
+            TaskBlobRecodeCompression::Disable => "disable",
+            TaskBlobRecodeCompression::Lz4 => "lz4",
+            TaskBlobRecodeCompression::Zstd => "zstd",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(TaskBlobRecodeCompression::Keep),
+            1 => Some(TaskBlobRecodeCompression::Disable),
+            2 => Some(TaskBlobRecodeCompression::Lz4),
+            3 => Some(TaskBlobRecodeCompression::Zstd),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for TaskBlobRecodeCompression {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskBlobRecodeCompression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for TaskBlobRecodeEncryptionType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            TaskBlobRecodeEncryptionType,
+            b"Keep" => TaskBlobRecodeEncryptionType::Keep,
+            b"Disable" => TaskBlobRecodeEncryptionType::Disable,
+            b"Encrypt" => TaskBlobRecodeEncryptionType::Encrypt,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            TaskBlobRecodeEncryptionType::Keep => "Keep",
+            TaskBlobRecodeEncryptionType::Disable => "Disable",
+            TaskBlobRecodeEncryptionType::Encrypt => "Encrypt",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(TaskBlobRecodeEncryptionType::Keep),
+            1 => Some(TaskBlobRecodeEncryptionType::Disable),
+            2 => Some(TaskBlobRecodeEncryptionType::Encrypt),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for TaskBlobRecodeEncryptionType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskBlobRecodeEncryptionType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -15593,6 +16006,7 @@ impl EnumImpl for TaskType {
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
             b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
+            b"BlobRecode" => TaskType::BlobRecode,
         }
         .copied()
     }
@@ -15620,6 +16034,7 @@ impl EnumImpl for TaskType {
             b"DmarcReportWindow" => TaskType::DmarcReportWindow,
             b"TlsReportWindow" => TaskType::TlsReportWindow,
             b"ExternalPublicKeyMaintenance" => TaskType::ExternalPublicKeyMaintenance,
+            b"BlobRecode" => TaskType::BlobRecode,
         }
         .copied()
     }
@@ -15655,6 +16070,7 @@ impl EnumImpl for TaskType {
             TaskType::DmarcReportWindow => "DmarcReportWindow",
             TaskType::TlsReportWindow => "TlsReportWindow",
             TaskType::ExternalPublicKeyMaintenance => "ExternalPublicKeyMaintenance",
+            TaskType::BlobRecode => "BlobRecode",
         }
     }
 
@@ -15693,11 +16109,12 @@ impl EnumImpl for TaskType {
             16 => Some(TaskType::DmarcReportWindow),
             17 => Some(TaskType::TlsReportWindow),
             18 => Some(TaskType::ExternalPublicKeyMaintenance),
+            19 => Some(TaskType::BlobRecode),
             _ => None,
         }
     }
 
-    const COUNT: usize = 19;
+    const COUNT: usize = 20;
 }
 
 impl TaskType {
@@ -15731,6 +16148,7 @@ impl TaskType {
         TaskType::DmarcReportWindow,
         TaskType::TlsReportWindow,
         TaskType::ExternalPublicKeyMaintenance,
+        TaskType::BlobRecode,
     ];
 }
 

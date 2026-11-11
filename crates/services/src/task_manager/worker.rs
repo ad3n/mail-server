@@ -11,6 +11,7 @@ use crate::task_manager::{
     tasks::{
         acme::AcmeTask,
         alarm::SendAlarmTask,
+        blob_recode::BlobRecodeTask,
         destroy_account::DestroyAccountTask,
         dkim::DkimManagementTask,
         dns::DnsManagementTask,
@@ -146,7 +147,12 @@ async fn run_job(
             clear_stale_due(&server, &job, lock, AssertValue::Hash(hash)).await
         }
         Ok(Some(StoredTask { task, hash })) => {
-            let outcome = with_lease(&server, lock, execute(&server, &task, server_instance)).await;
+            let outcome = with_lease(
+                &server,
+                lock,
+                Box::pin(execute(&server, &task, server_instance)),
+            )
+            .await;
             finish(
                 &server,
                 &job,
@@ -371,5 +377,6 @@ async fn execute(server: &Server, task: &Task, server_instance: Arc<ServerInstan
         Task::ExternalPublicKeyMaintenance(task) => {
             server.external_public_key_maintenance(task).await
         }
+        Task::BlobRecode(task) => server.blob_recode(task).await,
     }
 }

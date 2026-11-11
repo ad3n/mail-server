@@ -38,6 +38,7 @@ pub mod active_script;
 pub mod authentication;
 pub mod credential;
 pub mod oauth;
+pub mod passkey;
 pub mod permissions;
 pub mod rate_limit;
 pub mod sasl;
@@ -177,20 +178,8 @@ pub struct AccessToken {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenScope {
-    Grant {
-        grant_id: u64,
-        scopes: OAuthScopes,
-        client: GrantClient,
-    },
-    External {
-        scopes: OAuthScopes,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GrantClient {
-    FirstParty,
-    ThirdParty,
+    Grant { grant_id: u64, scopes: OAuthScopes },
+    External { scopes: OAuthScopes },
 }
 
 const _: () = assert!(size_of::<TokenScope>() <= 16);

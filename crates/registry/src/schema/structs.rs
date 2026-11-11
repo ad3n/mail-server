@@ -613,6 +613,8 @@ pub struct Authentication {
     pub max_app_passwords: Option<u64>,
     #[serde(rename = "maxApiKeys")]
     pub max_api_keys: Option<u64>,
+    #[serde(rename = "maxPasskeys")]
+    pub max_passkeys: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -739,7 +741,6 @@ pub enum BlobSwapStore {
     Default,
     S3(S3Store),
     Azure(AzureStore),
-    FileSystem(FileSystemStore),
     FoundationDb(FoundationDbStore),
     PostgreSql(PostgreSqlStore),
     MySql(MySqlStore),
@@ -854,7 +855,7 @@ pub struct Cache {
 pub enum CacheSwap {
     Disabled,
     LocalFile(LocalFileSwap),
-    Redis(RedisSwap),
+    InMemory(InMemorySwap),
     BlobStore(BlobStoreSwap),
 }
 
@@ -1033,6 +1034,7 @@ pub enum Coordinator {
     Redis(RedisStore),
     RedisCluster(RedisClusterStore),
     RedisSentinel(RedisSentinelStore),
+    Keep(KeepStore),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1041,6 +1043,7 @@ pub enum Credential {
     Password(PasswordCredential),
     AppPassword(SecondaryCredential),
     ApiKey(SecondaryCredential),
+    Passkey(PasskeyCredential),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3048,6 +3051,8 @@ pub struct Email {
     pub max_mailbox_name_length: u64,
     #[serde(rename = "compressionAlgorithm")]
     pub compression_algorithm: CompressionAlgo,
+    #[serde(rename = "blobEncryptionKey")]
+    pub blob_encryption_key: Option<Id>,
     #[serde(rename = "defaultFolders")]
     pub default_folders: VecMap<SpecialUse, EmailFolder>,
     #[serde(rename = "maxMessages")]
@@ -3249,6 +3254,10 @@ pub struct FileStorage {
     pub max_files: Option<u64>,
     #[serde(rename = "maxFolders")]
     pub max_folders: Option<u64>,
+    #[serde(rename = "compressionAlgorithm")]
+    pub compression_algorithm: CompressionAlgo,
+    #[serde(rename = "blobEncryptionKey")]
+    pub blob_encryption_key: Option<Id>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3488,6 +3497,7 @@ pub enum InMemoryStore {
     Redis(RedisStore),
     RedisCluster(RedisClusterStore),
     RedisSentinel(RedisSentinelStore),
+    Keep(KeepStore),
 }
 
 // SPDX-SnippetBegin
@@ -3503,6 +3513,33 @@ pub enum InMemoryStoreBase {
 }
 
 // SPDX-SnippetEnd
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InMemorySwap {
+    pub store: InMemorySwapStore,
+    #[serde(rename = "chunkSize")]
+    pub chunk_size: u64,
+    pub retention: Duration,
+    #[serde(rename = "flushChanges")]
+    pub flush_changes: u64,
+    #[serde(rename = "flushInterval")]
+    pub flush_interval: Duration,
+    #[serde(rename = "maxAccountSize")]
+    pub max_account_size: u64,
+    #[serde(rename = "minAccountSize")]
+    pub min_account_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum InMemorySwapStore {
+    Default,
+    Redis(RedisStore),
+    RedisCluster(RedisClusterStore),
+    RedisSentinel(RedisSentinelStore),
+    Keep(KeepStore),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IndexQueueStatus {
@@ -3635,6 +3672,56 @@ pub struct KafkaCoordinator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeepStore {
+    pub hosts: Map<String>,
+    #[serde(rename = "clusterDiscovery")]
+    pub cluster_discovery: bool,
+    pub secret: SecretKeyOptional,
+    pub tls: KeepTls,
+    pub connections: u64,
+    #[serde(rename = "shardConnections")]
+    pub shard_connections: u64,
+    #[serde(rename = "streamMode")]
+    pub stream_mode: KeepStreamMode,
+    #[serde(rename = "connectTimeout")]
+    pub connect_timeout: Duration,
+    #[serde(rename = "attemptTimeout")]
+    pub attempt_timeout: Duration,
+    pub deadline: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum KeepTls {
+    Disabled,
+    RawPublicKeys(KeepTlsRawPublicKeys),
+    Authority(KeepTlsAuthority),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeepTlsAuthority {
+    #[serde(rename = "caPath")]
+    pub ca_path: String,
+    #[serde(rename = "certPath")]
+    pub cert_path: String,
+    #[serde(rename = "keyPath")]
+    pub key_path: String,
+    #[serde(rename = "serverName")]
+    pub server_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeepTlsRawPublicKeys {
+    #[serde(rename = "keyPath")]
+    pub key_path: String,
+    #[serde(rename = "serverKeysPath")]
+    pub server_keys_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "@type")]
 pub enum KeySource {
     Manual,
@@ -3752,6 +3839,7 @@ pub enum LookupStore {
     Redis(RedisStore),
     RedisCluster(RedisClusterStore),
     RedisSentinel(RedisSentinelStore),
+    Keep(KeepStore),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4503,8 +4591,6 @@ pub struct OAuthClient {
     #[serde(rename = "postLogoutRedirectUris")]
     pub post_logout_redirect_uris: Map<String>,
     pub logo: Option<String>,
-    #[serde(rename = "firstParty")]
-    pub first_party: bool,
     pub scopes: Map<OAuthScope>,
     #[serde(rename = "grantTypes")]
     pub grant_types: Map<OAuthGrantType>,
@@ -4618,6 +4704,39 @@ pub struct OtpAuth {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct Passkey {
+    pub registration: Option<PasskeyRegistration>,
+    pub description: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: UTCDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PasskeyCredential {
+    #[serde(rename = "credentialId")]
+    pub credential_id: Id,
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+    #[serde(rename = "publicKey")]
+    pub public_key: String,
+    pub algorithm: PasskeyAlgorithm,
+    pub description: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: UTCDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PasskeyRegistration {
+    #[serde(rename = "clientDataJson")]
+    pub client_data_json: String,
+    #[serde(rename = "attestationObject")]
+    pub attestation_object: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PasswordCredential {
     #[serde(rename = "credentialId")]
     pub credential_id: Id,
@@ -4670,6 +4789,8 @@ pub struct PostgreSqlSettings {
 pub struct PostgreSqlStore {
     #[serde(rename = "connectTimeout")]
     pub connect_timeout: Option<Duration>,
+    #[serde(rename = "responseTimeout")]
+    pub response_timeout: Option<Duration>,
     #[serde(rename = "useTls")]
     pub use_tls: bool,
     #[serde(rename = "allowInvalidCerts")]
@@ -4902,32 +5023,6 @@ pub struct RedisStore {
     pub pool_timeout_wait: Option<Duration>,
     #[serde(rename = "poolTimeoutRecycle")]
     pub pool_timeout_recycle: Option<Duration>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RedisSwap {
-    pub store: RedisSwapStore,
-    #[serde(rename = "chunkSize")]
-    pub chunk_size: u64,
-    pub retention: Duration,
-    #[serde(rename = "flushChanges")]
-    pub flush_changes: u64,
-    #[serde(rename = "flushInterval")]
-    pub flush_interval: Duration,
-    #[serde(rename = "maxAccountSize")]
-    pub max_account_size: u64,
-    #[serde(rename = "minAccountSize")]
-    pub min_account_size: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "@type")]
-pub enum RedisSwapStore {
-    Default,
-    Redis(RedisStore),
-    RedisCluster(RedisClusterStore),
-    RedisSentinel(RedisSentinelStore),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5986,6 +6081,15 @@ pub struct SubAddressingCustom {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct SymmetricKey {
+    pub description: String,
+    pub cipher: SymmetricCipher,
+    pub key: SecretKey,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SystemSettings {
     #[serde(rename = "defaultHostname")]
     pub default_hostname: String,
@@ -6040,6 +6144,7 @@ pub enum Task {
     DmarcReportWindow(TaskReportWindow),
     TlsReportWindow(TaskReportWindow),
     ExternalPublicKeyMaintenance(TaskExternalPublicKeyMaintenance),
+    BlobRecode(TaskBlobRecode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6050,6 +6155,31 @@ pub struct TaskAccountMaintenance {
     #[serde(rename = "maintenanceType")]
     pub maintenance_type: TaskAccountMaintenanceType,
     pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskBlobRecode {
+    pub compression: TaskBlobRecodeCompression,
+    pub encryption: TaskBlobRecodeEncryption,
+    #[serde(rename = "shardIndex")]
+    pub shard_index: Option<u64>,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum TaskBlobRecodeEncryption {
+    Keep,
+    Disable,
+    Encrypt(TaskBlobRecodeKey),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskBlobRecodeKey {
+    #[serde(rename = "keyId")]
+    pub key_id: Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

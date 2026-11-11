@@ -310,6 +310,7 @@ impl MessageWrapper {
                 return;
             }
 
+            smtp_client.timeout = params.conn_strategy.timeout_data;
             if params.is_smtp {
                 // Handle SMTP response
                 match smtp_client

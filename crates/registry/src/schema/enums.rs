@@ -250,7 +250,6 @@ pub enum BlobSwapStoreType {
     Default = 0,
     S3 = 1,
     Azure = 2,
-    FileSystem = 3,
     FoundationDb = 4,
     PostgreSql = 5,
     MySql = 6,
@@ -274,7 +273,7 @@ pub enum CacheSwapType {
     #[default]
     Disabled = 0,
     LocalFile = 1,
-    Redis = 2,
+    InMemory = 2,
     BlobStore = 3,
 }
 
@@ -346,6 +345,7 @@ pub enum CompressionAlgo {
     #[default]
     Lz4 = 0,
     None = 1,
+    Zstd = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -360,6 +360,7 @@ pub enum CoordinatorType {
     Redis = 5,
     RedisCluster = 6,
     RedisSentinel = 7,
+    Keep = 8,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -378,6 +379,7 @@ pub enum CredentialType {
     Password = 0,
     AppPassword = 1,
     ApiKey = 2,
+    Passkey = 3,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1010,6 +1012,18 @@ pub enum InMemoryStoreType {
     Redis = 2,
     RedisCluster = 3,
     RedisSentinel = 4,
+    Keep = 5,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum InMemorySwapStoreType {
+    #[default]
+    Default = 0,
+    Redis = 1,
+    RedisCluster = 2,
+    RedisSentinel = 3,
+    Keep = 4,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1068,6 +1082,23 @@ pub enum JwtSignatureAlgorithm {
     Hs256 = 8,
     Hs384 = 9,
     Hs512 = 10,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum KeepStreamMode {
+    #[default]
+    Everywhere = 0,
+    Owner = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum KeepTlsType {
+    #[default]
+    Disabled = 0,
+    RawPublicKeys = 1,
+    Authority = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1456,6 +1487,7 @@ pub enum LookupStoreType {
     Redis = 4,
     RedisCluster = 5,
     RedisSentinel = 6,
+    Keep = 7,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1707,6 +1739,9 @@ pub enum OAuthScope {
     Contacts = 1,
     Calendars = 2,
     Files = 3,
+    Full = 4,
+    Security = 5,
+    Settings = 6,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1746,6 +1781,15 @@ pub enum OvhEndpoint {
     KimsufiCa = 3,
     SoyoustartEu = 4,
     SoyoustartCa = 5,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum PasskeyAlgorithm {
+    #[default]
+    Es256 = 0,
+    Ed25519 = 1,
+    Rs256 = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2350,6 +2394,11 @@ pub enum Permission {
     SysOAuthGrantQuery = 502,
     SysOidcProviderGet = 503,
     SysOidcProviderUpdate = 504,
+    SysPasskeyGet = 662,
+    SysPasskeyCreate = 663,
+    SysPasskeyUpdate = 664,
+    SysPasskeyDestroy = 665,
+    SysPasskeyQuery = 666,
     SysPublicKeyGet = 505,
     SysPublicKeyCreate = 506,
     SysPublicKeyUpdate = 507,
@@ -2442,6 +2491,11 @@ pub enum Permission {
     SysStoreLookupUpdate = 583,
     SysStoreLookupDestroy = 584,
     SysStoreLookupQuery = 585,
+    SysSymmetricKeyGet = 656,
+    SysSymmetricKeyCreate = 657,
+    SysSymmetricKeyUpdate = 658,
+    SysSymmetricKeyDestroy = 659,
+    SysSymmetricKeyQuery = 660,
     SysSystemSettingsGet = 586,
     SysSystemSettingsUpdate = 587,
     TaskCalendarAlarmEmail = 588,
@@ -2473,6 +2527,7 @@ pub enum Permission {
     TaskDmarcReportWindow = 604,
     TaskTlsReportWindow = 605,
     TaskExternalPublicKeyMaintenance = 655,
+    TaskBlobRecode = 661,
     SysTaskGet = 606,
     SysTaskCreate = 607,
     SysTaskUpdate = 608,
@@ -2653,16 +2708,6 @@ pub enum RedisProtocol {
     #[default]
     Resp2 = 0,
     Resp3 = 1,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[repr(u16)]
-pub enum RedisSwapStoreType {
-    #[default]
-    Default = 0,
-    Redis = 1,
-    RedisCluster = 2,
-    RedisSentinel = 3,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3111,6 +3156,7 @@ pub enum StorageQuota {
     MaxApiKeys = 16,
     MaxPublicKeys = 17,
     MaxDiskQuota = 18,
+    MaxPasskeys = 19,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3124,6 +3170,14 @@ pub enum SubAddressingType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum SymmetricCipher {
+    #[default]
+    Aes256Gcm = 0,
+    Chacha20Poly1305 = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum TaskAccountMaintenanceType {
     #[default]
     Purge = 0,
@@ -3131,6 +3185,25 @@ pub enum TaskAccountMaintenanceType {
     RecalculateImapUid = 2,
     RecalculateQuota = 3,
     RebuildShares = 4,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum TaskBlobRecodeCompression {
+    #[default]
+    Keep = 0,
+    Disable = 1,
+    Lz4 = 2,
+    Zstd = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum TaskBlobRecodeEncryptionType {
+    #[default]
+    Keep = 0,
+    Disable = 1,
+    Encrypt = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3237,6 +3310,7 @@ pub enum TaskType {
     DmarcReportWindow = 16,
     TlsReportWindow = 17,
     ExternalPublicKeyMaintenance = 18,
+    BlobRecode = 19,
 }
 
 // SPDX-SnippetBegin
