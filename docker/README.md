@@ -4,8 +4,9 @@ Jalankan perintah berikut dari root repositori. Gunakan Docker Engine dengan Doc
 Compose v2 atau lebih baru (`docker-compose` dapat dipakai jika tersedia sebagai
 perintah terpisah). Image Stalwart dibangun dari checkout ini agar format
 konfigurasi JSON sesuai dengan kode, sehingga build pertama dapat cukup lama.
-Compose memakai fitur `sqlite,postgres`, sama dengan default `task build:server`,
-tanpa fitur enterprise. Image juga membangun Web UI dari revisi upstream yang
+Compose secara default memakai fitur `sqlite postgres enterprise` agar cocok
+dengan edisi AGPL3/SEL dari Dockerfile awal. Edisi binary harus sama dengan edisi
+yang membuat database. Image juga membangun Web UI dari revisi upstream yang
 dipatok dengan overlay `resources/webui/src/`, termasuk menu integrasi Apps.
 Build Compose menonaktifkan LTO, memakai 16 codegen units, dan membatasi build
 ke 2 job untuk mengurangi kebutuhan RAM saat build lokal. Dockerfile standalone tetap
@@ -16,9 +17,38 @@ VM 6 GB tanpa swap meskipun LTO dinonaktifkan.
 
 ## Memperbarui instalasi yang sudah memakai Web UI upstream
 
+Pertahankan edisi database saat rebuild. Build dengan fitur `enterprise` memakai
+edisi AGPL3/SEL, sedangkan build tanpa fitur tersebut memakai AGPL3-only; Stalwart
+menolak membuka database dari edisi lain. Mengganti Web UI tidak memerlukan
+perubahan edisi backend.
+
+Jika database dibuat oleh Compose awal atau muncul error
+`The data store was created by the Stalwart AGPL3/SEL edition`, gunakan di `.env`:
+
+```dotenv
+STALWART_FEATURES="sqlite postgres enterprise"
+```
+
+Jika database dibuat oleh Compose sebelumnya yang memakai `sqlite postgres`
+tanpa `enterprise`, pertahankan edisi tersebut secara eksplisit:
+
+```dotenv
+STALWART_FEATURES="sqlite postgres"
+```
+
+Jangan menimpa `.env` yang sudah ada dengan `.env.example`. Cadangkan database
+sebelum update sesuai bagian Backup. Jika layanan sedang berulang kali gagal
+startup karena edisi, hentikan hanya service Stalwart dengan
+`docker compose stop stalwart`, sesuaikan fitur, lalu rebuild:
+
 ```sh
 docker compose up -d --build
+docker compose logs --tail=100 stalwart
 ```
+
+Tidak perlu menghapus data, menjalankan setup ulang, atau mengubah penanda edisi
+di database. Bind mount yang persisten menjaga file tetap ada, tetapi tidak
+menjamin kompatibilitas antar-edisi atau antar-versi binary.
 
 Image menetapkan `STALWART_WEBUI_URL=file:///usr/local/share/stalwart/webui.zip`.
 Server otomatis memakai bundle tersebut untuk aplikasi yang melayani `/admin`,
