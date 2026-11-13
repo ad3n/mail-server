@@ -22,7 +22,10 @@ RUN rustup target add "$(cat /target.txt)"
 COPY --from=planner /recipe.json /recipe.json
 RUN RUSTFLAGS="$(cat /flags.txt)" cargo chef cook --target "$(cat /target.txt)" --release --no-default-features --features "$STALWART_FEATURES" --recipe-path /recipe.json
 COPY . .
-RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart --no-default-features --features "$STALWART_FEATURES"
+ARG STALWART_LTO=true
+ARG STALWART_CODEGEN_UNITS=1
+ARG STALWART_BUILD_JOBS=4
+RUN CARGO_PROFILE_RELEASE_LTO="$STALWART_LTO" CARGO_PROFILE_RELEASE_CODEGEN_UNITS="$STALWART_CODEGEN_UNITS" CARGO_BUILD_JOBS="$STALWART_BUILD_JOBS" RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart --no-default-features --features "$STALWART_FEATURES"
 RUN mv "/build/target/$(cat /target.txt)/release" "/output"
 
 FROM --platform=$BUILDPLATFORM docker.io/node:24-bookworm-slim AS webui
@@ -47,7 +50,8 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     chown stalwart:stalwart /etc/stalwart /var/lib/stalwart
 COPY --from=builder --chmod=0755 /output/stalwart /usr/local/bin/stalwart
 COPY --from=webui --chmod=0644 /webui/.ignore/webui.zip /usr/local/share/stalwart/webui.zip
-RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/stalwart
+RUN chmod 0755 /usr/local/share/stalwart && \
+    setcap 'cap_net_bind_service=+ep' /usr/local/bin/stalwart
 USER stalwart
 WORKDIR /var/lib/stalwart
 VOLUME ["/etc/stalwart", "/var/lib/stalwart"]

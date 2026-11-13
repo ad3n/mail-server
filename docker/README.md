@@ -7,6 +7,12 @@ konfigurasi JSON sesuai dengan kode, sehingga build pertama dapat cukup lama.
 Compose memakai fitur `sqlite,postgres`, sama dengan default `task build:server`,
 tanpa fitur enterprise. Image juga membangun Web UI dari revisi upstream yang
 dipatok dengan overlay `resources/webui/src/`, termasuk menu integrasi Apps.
+Build Compose menonaktifkan LTO, memakai 16 codegen units, dan membatasi build
+ke 2 job untuk mengurangi kebutuhan RAM saat build lokal. Dockerfile standalone tetap
+memakai LTO penuh secara default; opsi ini dapat diatur melalui build args
+`STALWART_LTO`, `STALWART_CODEGEN_UNITS`, dan `STALWART_BUILD_JOBS`. Pada VM Docker dengan RAM terbatas,
+siapkan RAM/swap yang cukup: build binary masih dapat kehabisan memori pada
+VM 6 GB tanpa swap meskipun LTO dinonaktifkan.
 
 ## Memperbarui instalasi yang sudah memakai Web UI upstream
 

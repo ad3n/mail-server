@@ -7,6 +7,9 @@ x-stalwart-image: &stalwart-image
     dockerfile: Dockerfile
     args:
       STALWART_FEATURES: sqlite postgres
+      STALWART_LTO: "false"
+      STALWART_CODEGEN_UNITS: "16"
+      STALWART_BUILD_JOBS: "2"
 
 services:
   init:
