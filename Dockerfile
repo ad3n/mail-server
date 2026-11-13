@@ -7,6 +7,7 @@ RUN cargo chef prepare --recipe-path /recipe.json
 
 FROM --platform=$BUILDPLATFORM chef AS builder
 ARG TARGETPLATFORM
+ARG STALWART_FEATURES="sqlite postgres mysql rocks s3 redis keep azure nats enterprise"
 RUN case "${TARGETPLATFORM}" in \
     "linux/arm64") echo "aarch64-unknown-linux-gnu" > /target.txt && echo "-C linker=aarch64-linux-gnu-gcc" > /flags.txt ;; \
     "linux/amd64") echo "x86_64-unknown-linux-gnu" > /target.txt && echo "-C linker=x86_64-linux-gnu-gcc" > /flags.txt ;; \
@@ -19,10 +20,21 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     g++-x86-64-linux-gnu binutils-x86-64-linux-gnu
 RUN rustup target add "$(cat /target.txt)"
 COPY --from=planner /recipe.json /recipe.json
-RUN RUSTFLAGS="$(cat /flags.txt)" cargo chef cook --target "$(cat /target.txt)" --release --no-default-features --features "sqlite postgres mysql rocks s3 redis keep azure nats enterprise" --recipe-path /recipe.json
+RUN RUSTFLAGS="$(cat /flags.txt)" cargo chef cook --target "$(cat /target.txt)" --release --no-default-features --features "$STALWART_FEATURES" --recipe-path /recipe.json
 COPY . .
-RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart --no-default-features --features "sqlite postgres mysql rocks s3 redis keep azure nats enterprise"
+RUN RUSTFLAGS="$(cat /flags.txt)" cargo build --target "$(cat /target.txt)" --release -p stalwart --no-default-features --features "$STALWART_FEATURES"
 RUN mv "/build/target/$(cat /target.txt)/release" "/output"
+
+FROM --platform=$BUILDPLATFORM docker.io/node:24-bookworm-slim AS webui
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates zip && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /webui
+# Keep the upstream revision aligned with Taskfile.yml build:ui.
+RUN git init -q && \
+    git fetch --depth=1 https://github.com/stalwartlabs/webui.git 4414cd585b0cae9d271487ff5619631d9c752b04 && \
+    git checkout --detach FETCH_HEAD
+COPY resources/webui/src/ ./src/
+RUN bash build.sh
 
 FROM docker.io/debian:trixie-slim
 RUN export DEBIAN_FRONTEND=noninteractive && \
@@ -34,12 +46,14 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     mkdir -p /etc/stalwart /var/lib/stalwart && \
     chown stalwart:stalwart /etc/stalwart /var/lib/stalwart
 COPY --from=builder --chmod=0755 /output/stalwart /usr/local/bin/stalwart
+COPY --from=webui --chmod=0644 /webui/.ignore/webui.zip /usr/local/share/stalwart/webui.zip
 RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/stalwart
 USER stalwart
 WORKDIR /var/lib/stalwart
 VOLUME ["/etc/stalwart", "/var/lib/stalwart"]
 EXPOSE	443 25 110 587 465 143 993 995 4190 8080
 ENV STALWART_HEALTHCHECK_URL=https://127.0.0.1:443/healthz/live
+ENV STALWART_WEBUI_URL=file:///usr/local/share/stalwart/webui.zip
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsSk "$STALWART_HEALTHCHECK_URL" || curl -fsS http://127.0.0.1:8080/healthz/live || exit 1
 ENTRYPOINT ["/usr/local/bin/stalwart"]

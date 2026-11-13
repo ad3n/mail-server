@@ -5,6 +5,8 @@ x-stalwart-image: &stalwart-image
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      STALWART_FEATURES: sqlite postgres
 
 services:
   init:

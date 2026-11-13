@@ -62,9 +62,13 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
                     description: "Stalwart Web Interface".to_string(),
                     enable: true,
                     #[cfg(not(feature = "dev_mode"))]
-                    resource_url:
-                        "https://github.com/stalwartlabs/webui/releases/download/v2/webui.zip"
-                            .into(),
+                    resource_url: std::env::var("STALWART_WEBUI_URL")
+                        .ok()
+                        .filter(|url| !url.trim().is_empty())
+                        .unwrap_or_else(|| {
+                            "https://github.com/stalwartlabs/webui/releases/download/v2/webui.zip"
+                                .to_string()
+                        }),
                     #[cfg(feature = "dev_mode")]
                     resource_url: "file://../webui/.ignore/webui.zip".into(),
                     url_prefix: Map::new(vec!["/admin".into(), "/account".into()]),

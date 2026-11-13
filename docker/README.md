@@ -4,6 +4,30 @@ Jalankan perintah berikut dari root repositori. Gunakan Docker Engine dengan Doc
 Compose v2 atau lebih baru (`docker-compose` dapat dipakai jika tersedia sebagai
 perintah terpisah). Image Stalwart dibangun dari checkout ini agar format
 konfigurasi JSON sesuai dengan kode, sehingga build pertama dapat cukup lama.
+Compose memakai fitur `sqlite,postgres`, sama dengan default `task build:server`,
+tanpa fitur enterprise. Image juga membangun Web UI dari revisi upstream yang
+dipatok dengan overlay `resources/webui/src/`, termasuk menu integrasi Apps.
+
+## Memperbarui instalasi yang sudah memakai Web UI upstream
+
+```sh
+docker compose up -d --build
+```
+
+Image menetapkan `STALWART_WEBUI_URL=file:///usr/local/share/stalwart/webui.zip`.
+Server otomatis memakai bundle tersebut untuk aplikasi yang melayani `/admin`,
+termasuk pada database yang sudah terisi. Bundle dibaca dari image setiap startup
+atau reload aplikasi tanpa menggunakan cache bundle database, sehingga rebuild
+langsung memuat perubahan lokal. Tidak perlu mengubah Resource URL atau menjalankan
+Update Apps. Reload tab browser yang sudah terbuka setelah container aktif.
+
+Override ini tidak mengubah URL atau cache aplikasi yang sudah tersimpan di
+database, maupun aplikasi lain yang tidak melayani `/admin`. Jika variabel
+dihapus/dikosongkan, URL tersimpan kembali digunakan. Jangan hapus database atau
+direktori konfigurasi untuk mengganti Web UI. File bundle yang hilang/rusak akan
+dilaporkan sebagai error, bukan diam-diam diganti dengan Web UI upstream.
+
+## Menjalankan instalasi baru
 
 ```sh
 cp .env.example .env

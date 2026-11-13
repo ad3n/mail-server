@@ -94,6 +94,7 @@ pub struct WebApplicationManager {
     prefixes: Vec<String>,
     description: String,
     url: String,
+    bundle_override: bool,
     expiry: u64,
     blob_key: BlobHash,
     oauth_client_id: Option<String>,
@@ -358,6 +359,19 @@ impl WebApplications {
 
 impl WebApplicationManager {
     pub fn new(app: RegistryObject<Application>) -> Self {
+        Self::with_webui_url(app, std::env::var("STALWART_WEBUI_URL").ok())
+    }
+
+    fn with_webui_url(app: RegistryObject<Application>, webui_url: Option<String>) -> Self {
+        let webui_url = webui_url
+            .map(|url| url.trim().to_string())
+            .filter(|url| !url.is_empty())
+            .filter(|_| {
+                app.object
+                    .url_prefix
+                    .iter()
+                    .any(|prefix| normalize_url_prefix(prefix) == "admin")
+            });
         let base_path = app
             .object
             .unpack_directory
@@ -368,7 +382,8 @@ impl WebApplicationManager {
         Self {
             base_path,
             blob_key: BlobHash::generate(format!("{}{}", APP_BLOB_PREFIX, app.id.id()).as_bytes()),
-            url: app.object.resource_url,
+            bundle_override: webui_url.is_some(),
+            url: webui_url.unwrap_or(app.object.resource_url),
             description: app.object.description,
             expiry: app.object.auto_update_interval.as_secs(),
             index_meta: IndexMeta::new(
@@ -392,7 +407,7 @@ impl WebApplicationManager {
         force_refresh: bool,
         sweep_orphans: bool,
     ) -> trc::Result<AppRoutes> {
-        let mut cached = if force_refresh {
+        let mut cached = if force_refresh || self.bundle_override {
             None
         } else {
             match server
@@ -547,7 +562,10 @@ impl WebApplicationManager {
             }
         };
 
-        if !is_cached && let Err(err) = self.cache(server, &bundle).await {
+        if !is_cached
+            && !self.bundle_override
+            && let Err(err) = self.cache(server, &bundle).await
+        {
             trc::event!(
                 Resource(trc::ResourceEvent::Error),
                 Reason = err,
@@ -895,3 +913,56 @@ fn is_scope_token(scope: &str) -> bool {
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/common/src/manager/application/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod webui_override_tests {
+    use super::*;
+    use registry::{
+        schema::prelude::ObjectType,
+        types::{id::ObjectId, map::Map},
+    };
+
+    fn application(prefix: &str) -> RegistryObject<Application> {
+        RegistryObject {
+            id: ObjectId::new(ObjectType::Application, Id::singleton()),
+            revision: 0,
+            object: Application {
+                resource_url: "https://example.org/configured.zip".into(),
+                url_prefix: Map::new(vec![prefix.into(), "/account".into()]),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn existing_admin_application_uses_override_without_changing_identity() {
+        let configured = WebApplicationManager::with_webui_url(application("/admin"), None);
+        let overridden = WebApplicationManager::with_webui_url(
+            application("/admin/"),
+            Some(" file:///local/webui.zip ".into()),
+        );
+        assert_eq!(overridden.url, "file:///local/webui.zip");
+        assert!(overridden.bundle_override);
+        assert_eq!(configured.blob_key, overridden.blob_key);
+        assert_eq!(configured.prefixes, overridden.prefixes);
+    }
+
+    #[test]
+    fn other_applications_keep_their_configured_bundle() {
+        let app = WebApplicationManager::with_webui_url(
+            application("/admin-tools"),
+            Some("file:///local/webui.zip".into()),
+        );
+        assert_eq!(app.url, "https://example.org/configured.zip");
+        assert!(!app.bundle_override);
+    }
+
+    #[test]
+    fn absent_or_blank_override_uses_configured_bundle() {
+        for url in [None, Some("  ".into())] {
+            let app = WebApplicationManager::with_webui_url(application("/admin"), url);
+            assert_eq!(app.url, "https://example.org/configured.zip");
+            assert!(!app.bundle_override);
+        }
+    }
+}
