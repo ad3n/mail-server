@@ -16,13 +16,15 @@ from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
 
+from mail_tracking import external_id, outcome
+
 HOST = "127.0.0.1"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("account", nargs="?", help="Alamat email lengkap untuk login, pengirim, dan penerima")
-    parser.add_argument("--status", type=uuid.UUID, metavar="ID", help="Cek ulang ID tes sebelumnya")
+    parser.add_argument("--status", type=external_id, metavar="ID", help="Cek ulang ID tes sebelumnya")
     parser.add_argument("--smtp-port", type=int, default=1465)
     parser.add_argument("--imap-port", type=int, default=1993)
     parser.add_argument("--self-signed", action="store_true", help="Lewati verifikasi sertifikat TLS lokal")
@@ -96,8 +98,13 @@ def show_tracking(test_id, headers):
         connection.request("GET", f"/api/deliveries/{test_id}/status", headers=headers)
         response = connection.getresponse()
         if response.status == 200:
-            print("Status pengiriman:", response.read().decode())
-            return 0
+            rows = json.loads(response.read())
+            print("Status pengiriman:", json.dumps(rows, indent=2))
+            code, explanation = outcome(rows)
+            print(explanation)
+            if code == 2:
+                print(f"Cek ulang dengan ./tes-email --status {test_id}")
+            return code
         if response.status == 404:
             print(f"Status belum tercatat. Cek ulang dengan ./tes-email --status {test_id}")
             return 2

@@ -170,6 +170,56 @@ ini tidak mengubah isi database atau file konfigurasi. Jika kosong, hostname
 server tetap digunakan. Tidak perlu mengaktifkan client metadata eksternal
 untuk login ke admin lokal.
 
+## Tes email dan webhook di server remote
+
+Script `./tes-email-remote` dijalankan dari komputer Anda dengan Python 3,
+tanpa menjalankan Stalwart lokal. Default koneksi adalah SMTP TLS port 465 di
+`mail.moklaar.cloud` dan API `https://mail.moklaar.cloud`.
+
+1. Buat/pilih App melalui menu Apps, isi URL endpoint webhook yang dapat dijangkau
+   server, lalu simpan. Siapkan App-Key dan App-Token dari App tersebut.
+2. Jalankan dengan akun email SMTP yang valid:
+
+   ```sh
+   ./tes-email-remote pengguna@moklaar.cloud
+   # Atau kirim ke penerima lain melalui STARTTLS port 587:
+   ./tes-email-remote pengguna@moklaar.cloud --to tujuan@example.com --smtp-security starttls
+   ```
+
+3. Masukkan App-Key, App-Token, dan password SMTP saat diminta. Untuk otomasi,
+   tersedia environment `STALWART_APP_KEY`, `STALWART_APP_TOKEN`, dan
+   `STALWART_SMTP_PASSWORD`. Script tidak membaca kredensial `.stalwart-local`.
+4. Catat `External-ID` yang dicetak. Script mengirim header `App-Key`, `App-Token`,
+   dan `External-ID`, lalu menunggu status pengiriman hingga 60 detik.
+5. Periksa log/request yang diterima endpoint webhook Anda: payload harus memuat
+   `externalId` yang sama, penerima, dan status pengiriman. Status API `accepted`
+   berarti pengiriman selesai dan diterima tujuan, **bukan** bukti masuk Inbox,
+   dibaca, atau keberhasilan penerimaan callback webhook.
+   Script tidak mengganti konfigurasi webhook dan tidak menjalankan receiver publik.
+
+Untuk mengecek ulang tanpa mengirim email baru:
+
+```sh
+./tes-email-remote --status EXTERNAL_ID_DARI_TES
+```
+
+Opsi tambahan: `--wait 120`, `--smtp-host HOST`, `--smtp-port PORT`, dan
+`--api-url https://HOST`. Sertifikat TLS selalu diverifikasi. Exit code 0 berarti
+semua hasil berstatus `accepted`, 1 berarti error/`failed`/`removed`, dan 2 berarti
+`queued`/`deferred` atau belum tercatat saat timeout. Status tidak dikenal dianggap
+error. External-ID tidak harus UUID: ID dari `mail.go` juga dapat dicek. Script lokal lama tetap dapat dijalankan melalui `./tes-email`.
+
+`mail.go` juga mengecek API tracking otomatis setelah email diterima SMTP.
+Script memakai App-Key/App-Token yang sama dengan header email dan menunggu semua
+hasil berstatus `accepted`, `failed`, atau `removed`, lalu mencetak hasil JSON.
+`queued`, `deferred`, dan HTTP 404 diperiksa ulang setiap 2 detik. Default batas
+tunggu 120 detik; atur `TRACKING_TIMEOUT=5m` untuk memperpanjangnya.
+API default adalah `https://$SMTP_HOST` (port HTTPS standar), atau dapat diatur
+melalui `TRACKING_API_URL=https://mail.moklaar.cloud`. Sertifikat diverifikasi dan
+redirect API tidak diikuti. Error, timeout, atau hasil `failed`/`removed` memberi
+exit code 1. Jika timeout, cek External-ID melalui `./tes-email-remote --status ID`
+agar tidak mengirim ulang email yang sudah diterima SMTP.
+
 ## Lokasi data di host
 
 | Direktori | Isi |
