@@ -76,7 +76,7 @@ impl ManagementApi for Server {
             else {
                 return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
             };
-            let Some(origin) = integrations::apps_page_origin(
+            let Some((origin, prefix)) = integrations::apps_page_origin(
                 req.headers(),
                 request_origin(req, session).authority,
             ) else {
@@ -93,7 +93,12 @@ impl ManagementApi for Server {
                 self.decode_access_token(Some(GrantType::AccessToken), bearer)?
                     .claims
                     .is_some_and(|client| {
-                        apps.is_admin_ui_client(&client, OAuthClientKind::FirstParty, &origin)
+                        apps.is_admin_ui_client(
+                            &client,
+                            OAuthClientKind::FirstParty,
+                            &origin,
+                            &prefix,
+                        )
                     })
             } else {
                 self.oauth_grant(grant_id).await?.is_some_and(|stored| {
@@ -102,6 +107,7 @@ impl ManagementApi for Server {
                             &stored.grant.client_id,
                             stored.grant.client_kind,
                             &origin,
+                            &prefix,
                         )
                 })
             };

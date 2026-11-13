@@ -48,6 +48,7 @@ services:
     <<: *stalwart-image
     environment:
       STALWART_HOSTNAME: ${STALWART_HOSTNAME:-mail.example.com}
+      STALWART_PUBLIC_URL: ${STALWART_PUBLIC_URL:-}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     depends_on:
       init:

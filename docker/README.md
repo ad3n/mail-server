@@ -57,6 +57,14 @@ atau reload aplikasi tanpa menggunakan cache bundle database, sehingga rebuild
 langsung memuat perubahan lokal. Tidak perlu mengubah Resource URL atau menjalankan
 Update Apps. Reload tab browser yang sudah terbuka setelah container aktif.
 
+Menu Apps dapat digunakan dari `/admin/Management/x:App` maupun
+`/account/Management/x:App` oleh admin global dengan izin
+`sysSystemSettingsUpdate`. Keduanya harus merupakan prefix aplikasi Web UI yang
+sama yang melayani `/admin`. Token login harus cocok dengan prefix halaman yang
+dibuka; login ulang jika berpindah pintu masuk. Pemeriksaan origin dan pembatasan
+izin tetap berlaku, sehingga pengguna biasa tidak mendapat akses pengelolaan
+Apps. Perubahan backend ini memerlukan `docker compose up -d --build`.
+
 Override ini tidak mengubah URL atau cache aplikasi yang sudah tersimpan di
 database, maupun aplikasi lain yang tidak melayani `/admin`. Jika variabel
 dihapus/dikosongkan, URL tersimpan kembali digunakan. Jangan hapus database atau
@@ -119,6 +127,48 @@ Wizard wajib dijalankan sekali: membuat `config.json` saja tidak menginisialisas
 akun, domain, dan listener. Sesudah setup gunakan `https://HOSTNAME/admin`.
 Port 8080 digunakan untuk bootstrap/recovery; listener mail dan HTTPS dibuat
 oleh setup. Mapping port Compose saja tidak mengaktifkan listener.
+
+### Error login: Client metadata documents are disabled
+
+Untuk **instalasi baru yang belum selesai setup**, gunakan SSH tunnel dan akses
+`http://localhost:8080/admin/` seperti langkah setup di atas. Login dengan akun
+sementara dari log; wizard baru ditampilkan setelah login. Mode bootstrap
+memeriksa origin berdasarkan koneksi langsung ke Stalwart. Jika Nginx menerima
+HTTPS lalu meneruskan HTTP, client HTTPS tidak cocok dengan origin HTTP tersebut.
+Header `X-Forwarded-Proto` dan `STALWART_PUBLIC_URL` tidak mengatasi pemeriksaan
+same-origin pada mode bootstrap ini. Selesaikan setup melalui tunnel, lalu gunakan
+domain HTTPS publik untuk operasi normal.
+
+Log `server.bootstrap-mode` dengan pesan `No configuration file was found`
+menandakan server masuk mode setup. Jika `docker/config/config.json` masih ada,
+server mencoba membuka data store yang dikonfigurasi; rebuild atau membuat ulang
+container tidak menjadikan bind mount lama sebagai instalasi baru. Jangan hapus
+config atau data hanya untuk mengatasi error login.
+
+Untuk **instalasi yang sudah selesai setup**, periksa URL publik berikut.
+Admin lokal dikenali berdasarkan domain dan port HTTPS yang dipercaya server.
+Jika alamat browser berbeda dari hostname server (misalnya memakai IP, domain
+reverse proxy, atau port HTTPS tambahan), login bisa dianggap sebagai client
+eksternal dan ditolak dengan pesan ini.
+
+Isi origin publik yang benar di `.env`, tanpa path `/admin`:
+
+```dotenv
+STALWART_PUBLIC_URL=https://mail.example.com
+```
+
+Gunakan alamat HTTPS yang benar-benar Anda buka; sertakan port jika bukan 443,
+misalnya `https://mail.example.com:8443`. Lalu terapkan environment baru:
+
+```sh
+docker compose up -d
+```
+
+Buka kembali halaman `/admin/` pada alamat tersebut untuk memulai login baru.
+`docker compose restart` saja tidak memperbarui environment container. Variabel
+ini tidak mengubah isi database atau file konfigurasi. Jika kosong, hostname
+server tetap digunakan. Tidak perlu mengaktifkan client metadata eksternal
+untuk login ke admin lokal.
 
 ## Lokasi data di host
 

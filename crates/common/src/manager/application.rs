@@ -139,14 +139,20 @@ impl WebApplications {
         client_id: &str,
         kind: OAuthClientKind,
         page_origin: &str,
+        page_prefix: &str,
     ) -> bool {
+        if !matches!(page_prefix, "admin" | "account") {
+            return false;
+        }
         self.applications.load().iter().any(|app| {
             app.prefixes.iter().any(|prefix| prefix == "admin")
+                && app.prefixes.iter().any(|prefix| prefix == page_prefix)
                 && match app.oauth_client_id.as_deref() {
                     Some(configured) => client_id == configured,
                     None => {
                         kind == OAuthClientKind::FirstParty
-                            && client_id == format!("{page_origin}/admin/{APP_CLIENT_DOCUMENT}")
+                            && client_id
+                                == format!("{page_origin}/{page_prefix}/{APP_CLIENT_DOCUMENT}")
                     }
                 }
         })
@@ -932,6 +938,50 @@ mod webui_override_tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[test]
+    fn apps_accepts_both_webui_prefixes_with_matching_client() {
+        let apps = WebApplications::default();
+        apps.applications
+            .store(Arc::new(vec![WebApplicationManager::with_webui_url(
+                application("/admin"),
+                None,
+            )]));
+        let origin = "https://mail.example.org";
+        for prefix in ["admin", "account"] {
+            let client = format!("{origin}/{prefix}/{APP_CLIENT_DOCUMENT}");
+            assert!(apps.is_admin_ui_client(&client, OAuthClientKind::FirstParty, origin, prefix));
+            assert!(!apps.is_admin_ui_client(
+                &client,
+                OAuthClientKind::FirstParty,
+                "https://other.example.org",
+                prefix
+            ));
+            let other = if prefix == "admin" {
+                "account"
+            } else {
+                "admin"
+            };
+            assert!(!apps.is_admin_ui_client(&client, OAuthClientKind::FirstParty, origin, other));
+        }
+        assert!(!apps.is_admin_ui_client(
+            "https://mail.example.org/other/oauth-client.json",
+            OAuthClientKind::FirstParty,
+            origin,
+            "other"
+        ));
+        apps.applications
+            .store(Arc::new(vec![WebApplicationManager::with_webui_url(
+                application("/other"),
+                None,
+            )]));
+        assert!(!apps.is_admin_ui_client(
+            "https://mail.example.org/account/oauth-client.json",
+            OAuthClientKind::FirstParty,
+            origin,
+            "account"
+        ));
     }
 
     #[test]

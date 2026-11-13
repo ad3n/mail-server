@@ -115,7 +115,10 @@ fn revoke_credentials(batch: &mut BatchBuilder, credentials: &AppCredentials) {
         .clear(index);
 }
 
-pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> Option<String> {
+pub(super) fn apps_page_origin(
+    headers: &hyper::HeaderMap,
+    authority: &str,
+) -> Option<(String, String)> {
     if headers.get("sec-fetch-site")?.to_str().ok()? != "same-origin" {
         return None;
     }
@@ -126,7 +129,11 @@ pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> O
         .parse()
         .ok()?;
     let scheme = page.scheme_str()?;
-    let path = page.path().strip_prefix("/admin/Management/x:App")?;
+    let (prefix, path) = page.path().strip_prefix('/')?.split_once('/')?;
+    if !matches!(prefix, "admin" | "account") {
+        return None;
+    }
+    let path = path.strip_prefix("Management/x:App")?;
     if !matches!(scheme, "http" | "https")
         || !page.authority()?.as_str().eq_ignore_ascii_case(authority)
         || !(path.is_empty() || path.strip_prefix('/').is_some_and(valid_id))
@@ -139,7 +146,7 @@ pub(super) fn apps_page_origin(headers: &hyper::HeaderMap, authority: &str) -> O
     {
         return None;
     }
-    Some(origin)
+    Some((origin, prefix.to_string()))
 }
 
 pub async fn lookup(
@@ -322,8 +329,8 @@ mod tests {
         assert!(apps_page_origin(&headers, host).is_none());
         headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
         assert_eq!(
-            apps_page_origin(&headers, host).as_deref(),
-            Some("http://localhost:8080")
+            apps_page_origin(&headers, host),
+            Some(("http://localhost:8080".into(), "admin".into()))
         );
         for path in ["/new", "/app-123"] {
             headers.insert(
@@ -356,6 +363,48 @@ mod tests {
             HeaderValue::from_static("http://localhost:8080/admin/Management/x:Role"),
         );
         assert!(apps_page_origin(&headers, host).is_none());
+    }
+
+    #[test]
+    fn account_apps_requires_same_origin_and_exact_route() {
+        use hyper::header::{HeaderMap, HeaderValue, ORIGIN, REFERER};
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        for suffix in ["", "/new", "/app-123"] {
+            headers.insert(
+                REFERER,
+                format!("https://mail.example.org/account/Management/x:App{suffix}")
+                    .parse()
+                    .unwrap(),
+            );
+            assert_eq!(
+                apps_page_origin(&headers, "mail.example.org"),
+                Some(("https://mail.example.org".into(), "account".into()))
+            );
+            assert!(apps_page_origin(&headers, "other.example.org").is_none());
+        }
+        headers.insert(
+            ORIGIN,
+            HeaderValue::from_static("https://other.example.org"),
+        );
+        assert!(apps_page_origin(&headers, "mail.example.org").is_none());
+        headers.remove(ORIGIN);
+        headers.insert("sec-fetch-site", HeaderValue::from_static("cross-site"));
+        assert!(apps_page_origin(&headers, "mail.example.org").is_none());
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        for path in [
+            "account/Management/x:AppExtra",
+            "account/Management/x:App/id/more",
+            "account/Management/x:App/..",
+            "account/Management/x:Role",
+            "other/Management/x:App",
+        ] {
+            headers.insert(
+                REFERER,
+                format!("https://mail.example.org/{path}").parse().unwrap(),
+            );
+            assert!(apps_page_origin(&headers, "mail.example.org").is_none());
+        }
     }
 
     #[test]
