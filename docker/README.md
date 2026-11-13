@@ -1,0 +1,118 @@
+# Docker Compose dengan PostgreSQL
+
+Jalankan perintah berikut dari root repositori. Gunakan Docker Engine dengan Docker
+Compose v2 atau lebih baru (`docker-compose` dapat dipakai jika tersedia sebagai
+perintah terpisah). Image Stalwart dibangun dari checkout ini agar format
+konfigurasi JSON sesuai dengan kode, sehingga build pertama dapat cukup lama.
+
+```sh
+cp .env.example .env
+openssl rand -hex 32
+```
+
+Isi `POSTGRES_PASSWORD` di `.env` dengan password hasil perintah tersebut, lalu
+ubah `STALWART_HOSTNAME` ke hostname mail server Anda.
+
+```sh
+chmod 600 .env
+docker compose up -d --build
+docker compose logs stalwart
+```
+
+PostgreSQL hanya diakses lewat jaringan internal Compose. Service `init`
+menyiapkan kepemilikan direktori Stalwart untuk UID/GID `2000:2000` sesuai
+Dockerfile; Stalwart berjalan sebagai pengguna non-root. Jangan gunakan direktori
+database lama dari PostgreSQL major version lain tanpa migrasi.
+
+## Setup pertama
+
+Buka <http://localhost:8080/admin> dan gunakan akun admin sementara yang muncul di
+log Stalwart. Jika Docker berjalan di server remote, gunakan SSH tunnel:
+
+```sh
+ssh -L 8080:127.0.0.1:8080 user@server
+```
+
+Selesaikan wizard dengan memilih **PostgreSQL** sebagai **data store** (default
+wizard masih RocksDB), lalu isi:
+
+| Pengaturan | Nilai |
+| --- | --- |
+| Host | `postgres` |
+| Port | `5432` |
+| Database | `stalwart` |
+| Username | `stalwart` |
+| Password | Nilai `POSTGRES_PASSWORD` dari `.env` |
+| TLS koneksi database | Nonaktif untuk jaringan internal Compose ini |
+| Blob store | Default / gunakan data store |
+| Search store | Default / gunakan data store |
+| Directory | Internal |
+
+Jika editor secret menyediakan tipe `EnvironmentVariable`, gunakan nama
+`POSTGRES_PASSWORD`; variabel ini sudah diteruskan ke container Stalwart.
+Gunakan path log `/var/log/stalwart/` dan path data lokal di bawah
+`/var/lib/stalwart/`. Sesuaikan domain, akun administrator permanen, DNS, dan TLS
+di wizard. Permintaan sertifikat publik memerlukan domain/DNS yang sudah benar;
+nonaktifkan permintaan tersebut untuk percobaan lokal.
+
+Wizard wajib dijalankan sekali: membuat `config.json` saja tidak menginisialisasi
+akun, domain, dan listener. Sesudah setup gunakan `https://HOSTNAME/admin`.
+Port 8080 digunakan untuk bootstrap/recovery; listener mail dan HTTPS dibuat
+oleh setup. Mapping port Compose saja tidak mengaktifkan listener.
+
+## Lokasi data di host
+
+| Direktori | Isi |
+| --- | --- |
+| `docker/config/` | `config.json`, koneksi data store yang ditulis wizard |
+| `docker/postgres/` | Data PostgreSQL persisten |
+| `docker/data/` | Data lokal tambahan Stalwart |
+| `docker/logs/` | Log Stalwart |
+
+Konfigurasi operasional, akun, email/blob, dan indeks pencarian berada di
+PostgreSQL jika pilihan storage di atas dipertahankan. Backup `config.json`
+saja **tidak cukup**. Direktori runtime, `.env`, dan `backups/` diabaikan Git.
+`docker compose down` tidak menghapus bind mount ini.
+
+## Backup
+
+Hentikan Stalwart sementara agar dump database dan file lokal satu keadaan.
+PostgreSQL tetap berjalan untuk `pg_dump`. Jalankan berurutan, dan lanjutkan hanya
+jika setiap perintah berhasil:
+
+```sh
+mkdir -p backups
+chmod 700 backups
+backup_dir="backups/$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$backup_dir"
+docker compose stop stalwart
+docker compose exec -T postgres sh -ec 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup_dir/postgres.dump"
+sudo tar -czf "$backup_dir/files.tar.gz" .env compose.yaml docker/config docker/data docker/logs
+docker compose start stalwart
+```
+
+Jika backup gagal, jalankan `docker compose start stalwart` untuk memulihkan
+layanan dan jangan gunakan backup yang tidak lengkap. Simpan kedua file backup
+di lokasi lain yang aman; arsip berisi kredensial. Catat juga commit/image
+Stalwart dan versi PostgreSQL untuk restore. Jangan menyalin langsung
+`docker/postgres/` ketika database sedang berjalan.
+
+## Restore ke instalasi baru
+
+Gunakan checkout/image Stalwart yang sama dan PostgreSQL major version 17.
+Pastikan layanan Stalwart berhenti dan target database baru/kosong; langkah ini
+ditujukan untuk pemulihan ke direktori baru, bukan menimpa instalasi aktif.
+Ganti `BACKUP` dengan path backup:
+
+```sh
+sudo tar -xzf BACKUP/files.tar.gz
+docker compose up -d --wait postgres
+docker compose exec -T postgres sh -ec 'pg_restore --exit-on-error --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < BACKUP/postgres.dump
+docker compose up -d --build
+docker compose logs --tail=100 stalwart
+```
+
+Pertahankan password `.env` yang sesuai dengan database dan secret konfigurasi.
+Mengubah `.env` tidak otomatis mengganti password role PostgreSQL pada database
+yang sudah terinisialisasi. Jika storage tambahan dikonfigurasi di luar mount
+ini, cadangkan dan pulihkan storage tersebut juga.

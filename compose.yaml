@@ -1,0 +1,67 @@
+name: stalwart
+
+x-stalwart-image: &stalwart-image
+  image: stalwart-local:compose
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+services:
+  init:
+    <<: *stalwart-image
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        chown 2000:2000 /etc/stalwart /var/lib/stalwart /var/log/stalwart
+        chmod 700 /etc/stalwart /var/lib/stalwart /var/log/stalwart
+    volumes:
+      - ./docker/config:/etc/stalwart
+      - ./docker/data:/var/lib/stalwart
+      - ./docker/logs:/var/log/stalwart
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: stalwart
+      POSTGRES_USER: stalwart
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./docker/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  stalwart:
+    <<: *stalwart-image
+    environment:
+      STALWART_HOSTNAME: ${STALWART_HOSTNAME:-mail.example.com}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "143:143"
+      - "993:993"
+      - "110:110"
+      - "995:995"
+      - "4190:4190"
+      - "443:443"
+    volumes:
+      - ./docker/config:/etc/stalwart
+      - ./docker/data:/var/lib/stalwart
+      - ./docker/logs:/var/log/stalwart
+    restart: unless-stopped

@@ -154,6 +154,7 @@ Install Stalwart on your server by following the instructions for your platform:
 - [Linux / MacOS / FreeBSD](https://stalw.art/docs/install/platform/linux)
 - [Windows](https://stalw.art/docs/install/platform/windows)
 - [Docker](https://stalw.art/docs/install/platform/docker)
+- [Docker Compose with PostgreSQL and host-mounted configuration](docker/README.md)
 
 All documentation is available at [stalw.art/docs](https://stalw.art/docs/install/get-started).
 

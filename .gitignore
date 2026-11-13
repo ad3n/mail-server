@@ -7,3 +7,9 @@ run.sh
 !.gitattributes
 !.github
 !.cargo
+!.env.example
+/docker/config/
+/docker/data/
+/docker/logs/
+/docker/postgres/
+/backups/
