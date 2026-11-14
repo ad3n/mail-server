@@ -206,6 +206,79 @@ PostgreSQL jika pilihan storage di atas dipertahankan. Backup `config.json`
 saja **tidak cukup**. Direktori runtime, `.env`, dan `backups/` diabaikan Git.
 `docker compose down` tidak menghapus bind mount ini.
 
+## Unbound lokal dengan DNSSEC
+
+Gunakan overlay `compose.unbound.yaml` bersama Compose utama. Unbound melakukan
+resolusi rekursif langsung, tanpa forwarder Google/Cloudflare. Port 53 tidak
+dipublikasikan ke host. ACL hanya menerima localhost dan subnet resolver Docker.
+DNSSEC memakai validator dan root trust anchor dari paket `dns-root-data`, lalu
+memperbaruinya melalui RFC 5011 di volume `unbound-state` yang persisten.
+
+Pastikan subnet `172.30.53.0/24` tidak bentrok dengan jaringan server/VPN. Jika
+bentrok, sesuaikan subnet dan IP di overlay, ACL di `docker/unbound/unbound.conf`,
+serta alamat resolver di Web UI. Server harus dapat mengakses authoritative DNS
+langsung melalui UDP dan TCP port 53, dan jam host harus tersinkronisasi.
+
+Mulai Unbound dahulu; resolver Stalwart yang sekarang tetap berlaku:
+
+```sh
+docker compose -f compose.yaml -f compose.unbound.yaml up -d --build unbound
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound unbound-checkconf
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound dig @127.0.0.1 . DNSKEY +dnssec
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound dig @127.0.0.1 dnssec-failed.org A +dnssec
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound dig @127.0.0.1 moklaar.co.id MX +dnssec
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound dig @127.0.0.1 moklaar.co.id DS +dnssec +tcp
+```
+
+Hasil yang diharapkan: root DNSKEY `NOERROR` dengan flag `ad`; domain uji
+`dnssec-failed.org` menghasilkan `SERVFAIL`; MX moklaar berhasil (tanpa `ad`
+karena unsigned); DS moklaar `NOERROR`, tanpa jawaban DS, dengan flag `ad`.
+`SERVFAIL` saja tidak membuktikan validator bekerja jika query valid juga gagal.
+Jika gagal, periksa `logs --tail=100 unbound`, koneksi keluar port 53, dan jam host.
+
+Hubungkan container Stalwart ke jaringan resolver. Perintah ini dapat membuat
+ulang container Stalwart, sehingga jalankan pada waktu yang sesuai untuk restart:
+
+```sh
+docker compose -f compose.yaml -f compose.unbound.yaml up -d --no-build stalwart
+```
+
+Di Web UI, buka **Settings → Network → DNS → DNS Resolver**, pilih **Custom**:
+
+| Address | Port | Protocol |
+| --- | --- | --- |
+| `172.30.53.53` | `53` | `udp` |
+| `172.30.53.53` | `53` | `tcp` |
+
+Aktifkan **Enable EDNS** dan **TCP on error**; pertahankan opsi lain pada default.
+TCP harus menjadi entri server tersendiri agar pemeriksaan kemampuan DNSSEC/DANE
+Stalwart tersedia. TLS tidak diperlukan untuk koneksi di bridge Docker ini.
+Jangan memakai `127.0.0.1`: alamat itu menunjuk container Stalwart sendiri.
+Simpan, jalankan **Reload Settings** jika tersedia, kemudian ulangi Tester.
+Jika konfigurasi belum diterapkan, restart service Stalwart dengan kedua file
+Compose tersebut. Verifikasi log startup tidak menunjukkan DANE dinonaktifkan.
+
+Untuk memeriksa akses Spamhaus public mirror (sesuai ketentuan akun/penggunaan):
+
+```sh
+docker compose -f compose.yaml -f compose.unbound.yaml exec unbound dig @127.0.0.1 2.0.0.127.zen.spamhaus.org A
+```
+
+Alamat uji harus menghasilkan kode listing yang didokumentasikan Spamhaus.
+Jawaban `127.255.255.*` adalah error akses, bukan listing spam. Resolver sendiri
+tidak menghapus batas penggunaan atau kebutuhan langganan penyedia DNSBL.
+Tes DNS ini tetap perlu dilengkapi pemeriksaan hasil filter spam Stalwart.
+
+Selanjutnya selalu gunakan **kedua file Compose** untuk perintah `up`, `build`,
+dan `down`, agar koneksi jaringan resolver tidak hilang. Untuk rollback, ubah
+resolver Web UI kembali ke Google dan terapkan sebelum menghentikan Unbound.
+Rebuild image Unbound berkala dengan `build --pull --no-cache unbound`, kemudian
+`up -d unbound` (keduanya dengan dua file Compose) untuk pembaruan paket keamanan.
+Jangan menghapus volume `unbound-state` pada pemeliharaan rutin.
+
+Referensi: [resolver Stalwart](https://www.stalw.art/docs/server/dns/resolver/),
+[konfigurasi Unbound](https://unbound.docs.nlnetlabs.nl/en/latest/manpages/unbound.conf.html).
+
 ## Backup
 
 Hentikan Stalwart sementara agar dump database dan file lokal satu keadaan.
