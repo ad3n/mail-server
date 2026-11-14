@@ -13,3 +13,4 @@ run.sh
 /docker/logs/
 /docker/postgres/
 /backups/
+mail.go
