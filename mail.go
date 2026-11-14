@@ -151,7 +151,7 @@ func main() {
 	smtpUser := getEnv("SMTP_USER", "admin@mail.moklaar.cloud")
 	smtpPass := os.Getenv("SMTP_PASS")
 	mailFrom := getEnv("MAIL_FROM", smtpUser)
-	mailTo := getEnv("MAIL_TO", "surya.kejawen@gmail.com")
+	mailTo := getEnv("MAIL_TO", "surya@moklaar.co.id")
 
 	if smtpPass == "" {
 		log.Fatal("SMTP_PASS belum diisi")

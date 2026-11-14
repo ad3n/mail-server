@@ -20,13 +20,13 @@ use mail_auth::{
 use registry::schema::{
     enums::{DnsResolverProtocol, PolicyEnforcement},
     prelude::ObjectType,
-    structs::{Cache, DnsResolver, MtaSts, SystemSettings},
+    structs::{Cache, DnsCustomResolver, DnsResolver, DnsResolverCustom, MtaSts, SystemSettings},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::Arc,
     time::Instant,
@@ -202,7 +202,16 @@ impl Resolvers {
         let mut resolver_config: ResolverConfig;
         let mut opts = ResolverOpts::default();
 
-        match bp.setting_infallible::<DnsResolver>().await {
+        let resolver = match std::env::var("STALWART_DNS_SERVER") {
+            Ok(value) if !value.trim().is_empty() => deployment_resolver(&value)
+                .expect("Invalid STALWART_DNS_SERVER: expected IP:port with a nonzero port"),
+            Ok(_) | Err(std::env::VarError::NotPresent) => {
+                bp.setting_infallible::<DnsResolver>().await
+            }
+            Err(err) => panic!("Invalid STALWART_DNS_SERVER: {err}"),
+        };
+
+        match resolver {
             DnsResolver::System(resolver) => match read_system_conf() {
                 Ok((config, options)) => {
                     resolver_config = config;
@@ -321,6 +330,31 @@ impl Resolvers {
             dnssec,
         }
     }
+}
+
+fn deployment_resolver(value: &str) -> Result<DnsResolver, &'static str> {
+    let server = value
+        .trim()
+        .parse::<SocketAddr>()
+        .map_err(|_| "expected IP:port")?;
+    if server.port() == 0 {
+        return Err("port must be nonzero");
+    }
+
+    Ok(DnsResolver::Custom(DnsResolverCustom {
+        servers: [DnsResolverProtocol::Udp, DnsResolverProtocol::Tcp]
+            .into_iter()
+            .map(|protocol| DnsCustomResolver {
+                protocol,
+                address: registry::types::ipaddr::IpAddr(server.ip()),
+                port: u64::from(server.port()),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        enable_edns: true,
+        tcp_on_error: true,
+        ..Default::default()
+    }))
 }
 
 #[cfg(not(stalwart_tests))]
@@ -496,3 +530,41 @@ impl Clone for Resolvers {
 #[rustfmt::skip]
 #[path = "../../../../../../stalwart-tests/unit/common/src/config/smtp/resolver/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::*;
+
+    #[test]
+    fn deployment_resolver_enables_dnssec_transport() {
+        for value in ["172.30.53.53:53", " [::1]:5353 "] {
+            let expected: SocketAddr = value.trim().parse().unwrap();
+            let DnsResolver::Custom(resolver) = deployment_resolver(value).unwrap() else {
+                panic!("expected custom resolver");
+            };
+            assert!(resolver.enable_edns);
+            assert!(resolver.tcp_on_error);
+            let servers = resolver.servers.into_iter().collect::<Vec<_>>();
+            assert_eq!(servers.len(), 2);
+            assert_eq!(servers[0].protocol, DnsResolverProtocol::Udp);
+            assert_eq!(servers[1].protocol, DnsResolverProtocol::Tcp);
+            for server in servers {
+                assert_eq!(server.address.into_inner(), expected.ip());
+                assert_eq!(server.port, u64::from(expected.port()));
+            }
+        }
+    }
+
+    #[test]
+    fn deployment_resolver_rejects_invalid_endpoints() {
+        for value in [
+            "",
+            "unbound:53",
+            "172.30.53.53",
+            "127.0.0.1:0",
+            "127.0.0.1:65536",
+        ] {
+            assert!(deployment_resolver(value).is_err(), "{value}");
+        }
+    }
+}

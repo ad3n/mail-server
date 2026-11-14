@@ -44,9 +44,29 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  unbound:
+    build:
+      context: ./docker/unbound
+    restart: unless-stopped
+    volumes:
+      - unbound-state:/var/lib/unbound
+    networks:
+      resolver:
+        ipv4_address: 172.30.53.53
+    healthcheck:
+      test: ["CMD-SHELL", "dig @127.0.0.1 . DNSKEY +dnssec +time=3 +tries=1 | grep -q 'flags:.* ad;' "]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   stalwart:
     <<: *stalwart-image
+    networks:
+      default: {}
+      resolver: {}
     environment:
+      STALWART_DNS_SERVER: "172.30.53.53:53"
       STALWART_HOSTNAME: ${STALWART_HOSTNAME:-mail.example.com}
       STALWART_PUBLIC_URL: ${STALWART_PUBLIC_URL:-}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -54,6 +74,8 @@ services:
       init:
         condition: service_completed_successfully
       postgres:
+        condition: service_healthy
+      unbound:
         condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
@@ -71,3 +93,12 @@ services:
       - ./docker/data:/var/lib/stalwart
       - ./docker/logs:/var/log/stalwart
     restart: unless-stopped
+
+networks:
+  resolver:
+    ipam:
+      config:
+        - subnet: 172.30.53.0/24
+
+volumes:
+  unbound-state:
